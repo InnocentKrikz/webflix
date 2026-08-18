@@ -36,6 +36,24 @@ export function QualityBadge({ value }: { value: string }) {
   )
 }
 
+/** Compact maturity pill used inside hover-preview cards. */
+export function MaturityTag({ maturity }: { maturity: string }) {
+  return (
+    <span className="inline-flex items-center rounded border border-white/25 px-1 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
+      {maturity}
+    </span>
+  )
+}
+
+/** Compact quality pill used inside hover-preview cards. */
+export function QualityTag({ quality }: { quality: string }) {
+  return (
+    <span className="inline-flex items-center rounded bg-white/10 px-1 py-0.5 text-[10px] font-bold uppercase tracking-wider text-foreground/80">
+      {quality}
+    </span>
+  )
+}
+
 export function TypeTag({ type }: { type: Title['type'] }) {
   return (
     <span className="inline-flex items-center rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-foreground/80 backdrop-blur">
