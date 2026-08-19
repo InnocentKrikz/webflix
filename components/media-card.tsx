@@ -35,12 +35,12 @@ function Badge({ title }: { title: Title }) {
  * Signature card: shows a PORTRAIT poster at rest, and on hover expands into a
  * wider LANDSCAPE preview with backdrop art, meta and action buttons.
  */
-export function PortraitCard({ title }: { title: Title }) {
+export function PortraitCard({ title, className }: { title: Title; className?: string }) {
   const { open } = useModal()
 
   return (
     <motion.div
-      className="group relative z-0 w-[150px] shrink-0 sm:w-[170px] md:w-[185px]"
+      className={cn('group relative z-0 w-[150px] shrink-0 sm:w-[170px] md:w-[185px]', className)}
       whileHover={{ zIndex: 40 }}
     >
       {/* Resting portrait poster */}
@@ -118,18 +118,26 @@ export function PortraitCard({ title }: { title: Title }) {
 }
 
 /** Landscape card that on hover reveals overlay actions (used in most rows). */
-export function LandscapeCard({ title }: { title: Title }) {
+export function LandscapeCard({ title, className }: { title: Title; className?: string }) {
   const { open } = useModal()
 
   return (
     <motion.div
-      className="group relative w-[230px] shrink-0 sm:w-[260px] md:w-[300px]"
+      className={cn('group relative w-[230px] shrink-0 sm:w-[260px] md:w-[300px]', className)}
       whileHover={{ scale: 1.06, zIndex: 30 }}
       transition={{ type: 'spring', stiffness: 300, damping: 24 }}
     >
-      <button
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => open(title.id)}
-        className="relative block aspect-video w-full overflow-hidden rounded-md ring-1 ring-white/5"
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            open(title.id)
+          }
+        }}
+        className="relative block aspect-video w-full cursor-pointer overflow-hidden rounded-md ring-1 ring-white/5"
         aria-label={title.title}
       >
         <Badge title={title} />
@@ -159,7 +167,7 @@ export function LandscapeCard({ title }: { title: Title }) {
             </div>
           </div>
         </div>
-      </button>
+      </div>
     </motion.div>
   )
 }
