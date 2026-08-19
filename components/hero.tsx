@@ -119,25 +119,14 @@ export function Hero({ titles }: { titles: Title[] }) {
               </button>
             </div>
           </motion.div>
+          
         </AnimatePresence>
-      </div>
-
-      {/* right controls: mute + maturity */}
-      <div className="absolute bottom-24 right-4 z-10 flex items-center gap-3 md:bottom-28 md:right-8">
-        <button
-          onClick={() => setMuted((m) => !m)}
-          aria-label={muted ? 'Unmute' : 'Mute'}
-          className="grid size-10 place-items-center rounded-full border border-white/30 text-foreground/90 transition-colors hover:border-white/70"
-        >
-          {muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
-        </button>
-        <div className="border-l-2 border-primary bg-black/40 py-1 pl-3 pr-6 text-sm font-medium backdrop-blur">
-          {title.maturity}
-        </div>
-      </div>
-
-      {/* dots */}
-      <div className="absolute bottom-10 left-4 z-10 flex items-center gap-2 md:left-8">
+          {/* dots */}
+      <motion.div className=" bottom-10 left-4 z-10 flex items-center gap-2 md:left-8 mt-5"
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.6, delay: 0.3 }}
+      >
         {titles.map((t, i) => (
           <button
             key={t.id}
@@ -157,7 +146,24 @@ export function Hero({ titles }: { titles: Title[] }) {
             )}
           </button>
         ))}
+      </motion.div>
       </div>
+
+      {/* right controls: mute + maturity */}
+      <div className="absolute bottom-24 right-4 z-10 flex items-center gap-3 md:bottom-28 md:right-8">
+        <button
+          onClick={() => setMuted((m) => !m)}
+          aria-label={muted ? 'Unmute' : 'Mute'}
+          className="grid size-10 place-items-center rounded-full border border-white/30 text-foreground/90 transition-colors hover:border-white/70"
+        >
+          {muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
+        </button>
+        <div className="border-l-2 border-primary bg-black/40 py-1 pl-3 pr-6 text-sm font-medium backdrop-blur">
+          {title.maturity}
+        </div>
+      </div>
+
+    
     </section>
   )
 }
