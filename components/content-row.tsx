@@ -4,9 +4,8 @@ import { useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { LandscapeCard, PortraitCard, RankedCard } from '@/components/media-card'
-import { getTitle } from '@/lib/data'
 import { cn } from '@/lib/utils'
-import type { Row, Title } from '@/lib/types'
+import type { Row } from '@/lib/types'
 
 function Toggle({
   value,
@@ -43,9 +42,7 @@ export function ContentRow({ row }: { row: Row }) {
   const scroller = useRef<HTMLDivElement>(null)
   const [filter, setFilter] = useState<'movie' | 'tv'>('movie')
 
-  let titles = row.titleIds
-    .map(getTitle)
-    .filter((t): t is Title => Boolean(t))
+  let titles = row.titles
   if (row.filterable) titles = titles.filter((t) => t.type === filter)
 
   const scroll = (dir: -1 | 1) => {

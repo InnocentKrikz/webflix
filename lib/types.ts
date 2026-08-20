@@ -65,6 +65,6 @@ export interface Row {
   id: string
   title: string
   kind: 'landscape' | 'top10' | 'ranked' | 'billboard'
-  titleIds: string[]
+  titles: Title[]
   filterable?: boolean
 }

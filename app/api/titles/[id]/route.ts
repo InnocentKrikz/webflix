@@ -8,11 +8,11 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
-  const movie = await getTitle(`movie-${id}`)
+  const title = await getTitle(id)
 
-  if (!movie) {
-    return NextResponse.json({ error: 'Movie not found' }, { status: 404 })
+  if (!title) {
+    return NextResponse.json({ error: 'Title not found' }, { status: 404 })
   }
 
-  return NextResponse.json(movie)
+  return NextResponse.json(title)
 }

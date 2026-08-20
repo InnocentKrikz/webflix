@@ -3,7 +3,7 @@
 import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Select from '@radix-ui/react-select'
 import * as Switch from '@radix-ui/react-switch'
@@ -19,9 +19,8 @@ import {
   VolumeX,
   X,
 } from 'lucide-react'
-import { useModal, useMyList } from '@/components/providers'
+import { useCatalog, useModal, useMyList } from '@/components/providers'
 import { LandscapeCard } from '@/components/media-card'
-import { getTitle } from '@/lib/data'
 import { cn } from '@/lib/utils'
 import type { Title } from '@/lib/types'
 
@@ -88,13 +87,38 @@ function EpisodeRow({
 
 export function DetailModal() {
   const { openId, close } = useModal()
+  const { getTitle, registerTitles } = useCatalog()
   const router = useRouter()
   const { has, toggle } = useMyList()
   const [muted, setMuted] = useState(true)
   const [spoilerProtected, setSpoilerProtected] = useState(true)
   const [seasonIdx, setSeasonIdx] = useState(0)
+  const [loadingId, setLoadingId] = useState<string | null>(null)
+  const [requestedDetails, setRequestedDetails] = useState<string[]>([])
 
   const title = openId ? getTitle(openId) : undefined
+
+  useEffect(() => {
+    if (!openId || loadingId === openId) return
+    if (requestedDetails.includes(openId)) return
+    if (title && title.cast.length > 0 && title.trailers.length > 0) return
+
+    const controller = new AbortController()
+    setLoadingId(openId)
+
+    fetch(`/api/titles/${openId}`, { signal: controller.signal })
+      .then((response) => (response.ok ? response.json() : undefined))
+      .then((detail: Title | undefined) => {
+        if (detail) registerTitles([detail])
+      })
+      .catch(() => {})
+      .finally(() => {
+        setRequestedDetails((ids) => (ids.includes(openId) ? ids : [...ids, openId]))
+        setLoadingId(null)
+      })
+
+    return () => controller.abort()
+  }, [loadingId, openId, registerTitles, requestedDetails, title])
 
   const similar = useMemo(() => {
     if (!title) return []
@@ -112,7 +136,7 @@ export function DetailModal() {
   }
 
   return (
-    <Dialog.Root open={Boolean(title)} onOpenChange={onOpenChange}>
+    <Dialog.Root open={Boolean(openId)} onOpenChange={onOpenChange}>
       <AnimatePresence>
         {title && (
           <Dialog.Portal forceMount>
@@ -208,7 +232,11 @@ export function DetailModal() {
                         <span className="text-muted-foreground">{title.year}</span>
                         <span className="rounded border border-white/25 px-1.5 py-0.5 text-xs font-semibold">{title.maturity}</span>
                         <span className="text-muted-foreground">
-                          {title.type === 'tv' ? `${title.seasons?.length} Season${(title.seasons?.length ?? 1) > 1 ? 's' : ''}` : title.runtime}
+                          {title.type === 'tv'
+                            ? title.seasons?.length
+                              ? `${title.seasons.length} Season${title.seasons.length === 1 ? '' : 's'}`
+                              : 'Series'
+                            : title.runtime}
                         </span>
                         <span className="rounded bg-white/10 px-1.5 py-0.5 text-xs font-bold">{title.quality}</span>
                       </div>
@@ -219,7 +247,7 @@ export function DetailModal() {
                     <div className="space-y-3 text-sm">
                       <p>
                         <span className="text-muted-foreground">Cast: </span>
-                        <span className="text-foreground/90">{title.cast.map((c) => c.character).join(', ')}</span>
+                        <span className="text-foreground/90">{title.cast.map((c) => c.name).join(', ')}</span>
                       </p>
                       <p>
                         <span className="text-muted-foreground">Genres: </span>

@@ -27,17 +27,70 @@ async function tmdbFetch<T>(
 
 export const tmdb = {
   movie(id: number) {
-    return tmdbFetch(`/movie/${id}?append_to_response=credits`);
+    return tmdbFetch(`/movie/${id}?append_to_response=credits,videos`);
   },
 
-  tv(id: number) {
-    return tmdbFetch(`/tv/${id}`);
+  movies: {
+    details(id: number) {
+      return tmdbFetch(`/movie/${id}?append_to_response=credits,videos`);
+    },
+    popular() {
+      return tmdbFetch(`/movie/popular`);
+    },
+    nowPlaying() {
+      return tmdbFetch(`/movie/now_playing`);
+    },
+    topRated() {
+      return tmdbFetch(`/movie/top_rated`);
+    },
+    trending(timeWindow = "day") {
+      return tmdbFetch(`/trending/movie/${timeWindow}`);
+    },
   },
 
-  trending(mediaType = "all", timeWindow = "day") {
-    return tmdbFetch(
-      `/trending/${mediaType}/${timeWindow}`
-    );
+  tv: {
+    details(id: number) {
+      return tmdbFetch(`/tv/${id}?append_to_response=credits,videos`);
+    },
+    seasonDetails(id: number, seasonNumber: number) {
+      return tmdbFetch(`/tv/${id}/season/${seasonNumber}`);
+    },
+    popular() {
+      return tmdbFetch(`/tv/popular`);
+    },
+    nowPlaying() {
+      return tmdbFetch(`/tv/on_the_air`);
+    },
+    topRated() {
+      return tmdbFetch(`/tv/top_rated`);
+    },
+    trending(timeWindow = "day") {
+      return tmdbFetch(`/trending/tv/${timeWindow}`);
+    },
+  },
+
+  trending: {
+    all(timeWindow = "day") {
+      return tmdbFetch(`/trending/all/${timeWindow}`);
+    },
+    movies(timeWindow = "day") {
+      return tmdbFetch(`/trending/movie/${timeWindow}`);
+    },
+    tv(timeWindow = "day") {
+      return tmdbFetch(`/trending/tv/${timeWindow}`);
+    },
+  },
+
+  featured: {
+    all() {
+      return tmdbFetch(`/trending/all/day`);
+    },
+    movies() {
+      return tmdbFetch(`/trending/movie/day`);
+    },
+    tv() {
+      return tmdbFetch(`/trending/tv/day`);
+    },
   },
 
   searchMovie(query: string) {
@@ -50,5 +103,14 @@ export const tmdb = {
     return tmdbFetch(
       `/search/tv?query=${encodeURIComponent(query)}`
     );
+  },
+
+  genres: {
+    movies() {
+      return tmdbFetch(`/genre/movie/list`);
+    },
+    tv() {
+      return tmdbFetch(`/genre/tv/list`);
+    },
   },
 };

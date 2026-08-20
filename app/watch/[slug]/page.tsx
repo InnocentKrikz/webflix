@@ -2,6 +2,8 @@ import { notFound } from 'next/navigation'
 import { VideoPlayer } from '@/components/video-player'
 import { getBySlug } from '@/lib/data'
 
+export const dynamic = 'force-dynamic'
+
 export default async function WatchPage({
   params,
   searchParams,
@@ -11,7 +13,7 @@ export default async function WatchPage({
 }) {
   const { slug } = await params
   const { s, e } = await searchParams
-  const title = getBySlug(slug)
+  const title = await getBySlug(slug)
 
   if (!title) notFound()
 

@@ -9,6 +9,7 @@ import {
   useState,
 } from 'react'
 import { DetailModal } from '@/components/detail-modal'
+import type { Title } from '@/lib/types'
 
 /* ----------------------------- My List store ----------------------------- */
 
@@ -21,6 +22,16 @@ interface MyListContextValue {
 const MyListContext = createContext<MyListContextValue | null>(null)
 
 const STORAGE_KEY = 'webflix:my-list'
+
+/* ----------------------------- Catalog store ----------------------------- */
+
+interface CatalogContextValue {
+  titles: Title[]
+  getTitle: (id: string) => Title | undefined
+  registerTitles: (titles: Title[]) => void
+}
+
+const CatalogContext = createContext<CatalogContextValue | null>(null)
 
 /* ------------------------------ Modal store ------------------------------ */
 
@@ -35,6 +46,7 @@ const ModalContext = createContext<ModalContextValue | null>(null)
 export function Providers({ children }: { children: React.ReactNode }) {
   const [ids, setIds] = useState<string[]>([])
   const [openId, setOpenId] = useState<string | null>(null)
+  const [catalog, setCatalog] = useState<Record<string, Title>>({})
 
   useEffect(() => {
     try {
@@ -65,6 +77,26 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   const myList = useMemo<MyListContextValue>(() => ({ ids, has, toggle }), [ids, has, toggle])
 
+  const registerTitles = useCallback((titles: Title[]) => {
+    if (titles.length === 0) return
+    setCatalog((current) => {
+      const next = { ...current }
+      for (const title of titles) next[title.id] = title
+      return next
+    })
+  }, [])
+
+  const getTitle = useCallback((id: string) => catalog[id], [catalog])
+
+  const catalogValue = useMemo<CatalogContextValue>(
+    () => ({
+      titles: Object.values(catalog),
+      getTitle,
+      registerTitles,
+    }),
+    [catalog, getTitle, registerTitles],
+  )
+
   const modal = useMemo<ModalContextValue>(
     () => ({
       openId,
@@ -76,10 +108,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <MyListContext.Provider value={myList}>
-      <ModalContext.Provider value={modal}>
-        {children}
-        <DetailModal />
-      </ModalContext.Provider>
+      <CatalogContext.Provider value={catalogValue}>
+        <ModalContext.Provider value={modal}>
+          {children}
+          <DetailModal />
+        </ModalContext.Provider>
+      </CatalogContext.Provider>
     </MyListContext.Provider>
   )
 }
@@ -93,5 +127,11 @@ export function useMyList() {
 export function useModal() {
   const ctx = useContext(ModalContext)
   if (!ctx) throw new Error('useModal must be used within Providers')
+  return ctx
+}
+
+export function useCatalog() {
+  const ctx = useContext(CatalogContext)
+  if (!ctx) throw new Error('useCatalog must be used within Providers')
   return ctx
 }

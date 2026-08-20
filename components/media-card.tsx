@@ -99,7 +99,13 @@ export function PortraitCard({ title, className }: { title: Title; className?: s
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
               <span className="font-semibold text-emerald-400">{Math.round(title.rating * 10)}% Match</span>
               <MaturityTag maturity={title.maturity} />
-              <span className="text-muted-foreground">{title.type === 'tv' ? `${title.seasons?.length} Seasons` : title.runtime}</span>
+              <span className="text-muted-foreground">
+                {title.type === 'tv'
+                  ? title.seasons?.length
+                    ? `${title.seasons.length} Season${title.seasons.length === 1 ? '' : 's'}`
+                    : 'Series'
+                  : title.runtime}
+              </span>
               <QualityTag quality={title.quality} />
             </div>
             <div className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">

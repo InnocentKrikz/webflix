@@ -16,14 +16,23 @@ export function Hero({ titles }: { titles: Title[] }) {
   const { open } = useModal()
   const { has, toggle } = useMyList()
 
-  const next = useCallback(() => setIndex((i) => (i + 1) % titles.length), [titles.length])
+  const next = useCallback(() => {
+    if (titles.length === 0) return
+    setIndex((i) => (i + 1) % titles.length)
+  }, [titles.length])
 
   useEffect(() => {
+    if (titles.length === 0) return
     const t = setInterval(next, 8000)
     return () => clearInterval(t)
-  }, [next])
+  }, [next, titles.length])
 
   const title = titles[index]
+
+  if (!title) {
+    return <section className="h-[40vh] min-h-[320px] w-full bg-background" />
+  }
+
   const inList = has(title.id)
 
   return (
