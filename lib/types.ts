@@ -4,6 +4,8 @@ export type Maturity = 'G' | 'PG' | 'PG-13' | 'R' | 'TV-14' | 'TV-MA'
 
 export type Quality = 'HD' | '4K'
 
+export type TitleBadge = 'Recently Added' | 'New Season' | 'Top 10'
+
 export interface CastMember {
   name: string
   character: string
@@ -57,7 +59,8 @@ export interface Title {
   seasons?: Season[]
   similar: string[]
   trailers: Trailer[]
-  badge?: 'Recently added' | 'New Episode' | 'Top 10'
+  badges?: TitleBadge[]
+  badge?: TitleBadge
   featured?: boolean
 }
 
@@ -67,4 +70,5 @@ export interface Row {
   kind: 'landscape' | 'top10' | 'ranked' | 'billboard'
   titles: Title[]
   filterable?: boolean
+  variants?: Partial<Record<MediaType, Pick<Row, 'title' | 'kind' | 'titles'>>>
 }

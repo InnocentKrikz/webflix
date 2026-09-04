@@ -2,7 +2,7 @@ import { prisma } from "../prisma";
 import { tmdb } from "../tmdb";
 
 export async function syncMovie(tmdbId: number) {
-  const movie: any = await tmdb.movie(tmdbId);
+  const movie: any = await tmdb.movies.details(tmdbId);
 
   await prisma.movie.upsert({
     where: {

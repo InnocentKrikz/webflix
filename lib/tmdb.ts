@@ -1,5 +1,5 @@
 //Proxy to Backend URL  
-const TMDB_BASE_URL = "https://2297-20-61-127-55.ngrok-free.app";
+const TMDB_BASE_URL = "https://a726-20-61-127-55.ngrok-free.app";
 
 async function tmdbFetch<T>(
   endpoint: string,
@@ -16,7 +16,7 @@ async function tmdbFetch<T>(
       },
     }
   );
-console.log(`${TMDB_BASE_URL}${endpoint}`)
+//console.log(`${TMDB_BASE_URL}${endpoint}`)
   if (!response.ok) {
     throw new Error(
       `TMDB request failed: ${response.status} ${response.statusText}`

@@ -42,8 +42,11 @@ export function ContentRow({ row }: { row: Row }) {
   const scroller = useRef<HTMLDivElement>(null)
   const [filter, setFilter] = useState<'movie' | 'tv'>('movie')
 
-  let titles = row.titles
-  if (row.filterable) titles = titles.filter((t) => t.type === filter)
+  const variant = row.filterable ? row.variants?.[filter] : undefined
+  const title = variant?.title ?? row.title
+  const kind = variant?.kind ?? row.kind
+  let titles = variant?.titles ?? row.titles
+  if (row.filterable && !variant) titles = titles.filter((t) => t.type === filter)
 
   const scroll = (dir: -1 | 1) => {
     const el = scroller.current
@@ -58,7 +61,7 @@ export function ContentRow({ row }: { row: Row }) {
       <div className="mb-2 flex items-center gap-3 px-4 md:px-12">
         <h2 className="relative flex items-center gap-2 font-heading text-lg font-bold md:text-xl">
           <span className="h-5 w-1 rounded-full bg-primary" />
-          {row.title}
+          {title}
         </h2>
         {row.filterable && <Toggle value={filter} onChange={setFilter} />}
       </div>
@@ -76,7 +79,7 @@ export function ContentRow({ row }: { row: Row }) {
           ref={scroller}
           className={cn(
             'no-scrollbar flex gap-2.5 overflow-x-auto scroll-smooth px-4 pb-8 pt-2 md:gap-3 md:px-12',
-            row.kind === 'ranked' && 'items-end',
+            kind === 'ranked' && 'items-end',
           )}
         >
           <AnimatePresence mode="popLayout">
@@ -89,9 +92,9 @@ export function ContentRow({ row }: { row: Row }) {
                 exit={{ opacity: 0, scale: 0.9 }}
                 transition={{ delay: Math.min(i * 0.04, 0.4) }}
               >
-                {row.kind === 'ranked' ? (
+                {kind === 'ranked' ? (
                   <RankedCard title={t} rank={i + 1} />
-                ) : row.kind === 'top10' ? (
+                ) : kind === 'top10' ? (
                   <PortraitCard title={t} />
                 ) : (
                   <LandscapeCard title={t} />

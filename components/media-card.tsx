@@ -9,25 +9,46 @@ import { MaturityTag, QualityTag } from '@/components/pieces'
 import { cn } from '@/lib/utils'
 import type { Title } from '@/lib/types'
 
-function Badge({ title }: { title: Title }) {
-  if (!title.badge) return null
-  const isTop = title.badge === 'Top 10'
+function titleBadges(title: Title) {
+  return title.badges?.length ? title.badges : title.badge ? [title.badge] : []
+}
+
+function TopBadges({ title }: { title: Title }) {
+  const badges = titleBadges(title).filter((badge) => badge === 'Top 10')
+  if (badges.length === 0) return null
+
   return (
-    <span
-      className={cn(
-        'absolute left-0 top-2 z-10 rounded-r px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide',
-        isTop ? 'bg-primary text-primary-foreground' : 'bg-primary text-primary-foreground',
-      )}
-    >
-      {isTop ? (
-        <span className="flex flex-col items-center leading-none">
-          <span className="text-[8px]">TOP</span>
-          <span>10</span>
+    <div className="absolute left-0 top-2 z-10 flex max-w-[82%] flex-col items-start gap-1">
+      {badges.map((badge) => (
+        <span
+          key={badge}
+          className="rounded-r bg-primary px-1.5 py-0.5 text-[10px] font-bold uppercase leading-none tracking-wide text-primary-foreground"
+        >
+          <span className="flex flex-col items-center leading-none">
+            <span className="text-[8px]">TOP</span>
+            <span>10</span>
+          </span>
         </span>
-      ) : (
-        title.badge
-      )}
-    </span>
+      ))}
+    </div>
+  )
+}
+
+function SideBadges({ title }: { title: Title }) {
+  const badges = titleBadges(title).filter((badge) => badge !== 'Top 10')
+  if (badges.length === 0) return null
+
+  return (
+    <div className="absolute right-0 top-2 z-10 flex max-w-[82%] flex-col items-end gap-1">
+      {badges.map((badge) => (
+        <span
+          key={badge}
+          className="rounded-l bg-primary px-1.5 py-0.5 text-[10px] font-bold uppercase leading-none tracking-wide text-primary-foreground shadow-sm shadow-black/30"
+        >
+          {badge}
+        </span>
+      ))}
+    </div>
   )
 }
 
@@ -49,7 +70,8 @@ export function PortraitCard({ title, className }: { title: Title; className?: s
         className="relative block aspect-[2/3] w-full overflow-hidden rounded-md ring-1 ring-white/5"
         aria-label={title.title}
       >
-        <Badge title={title} />
+        <TopBadges title={title} />
+        <SideBadges title={title} />
         <Image
           src={title.poster || '/placeholder.svg'}
           alt={title.title}
@@ -146,7 +168,8 @@ export function LandscapeCard({ title, className }: { title: Title; className?: 
         className="relative block aspect-video w-full cursor-pointer overflow-hidden rounded-md ring-1 ring-white/5"
         aria-label={title.title}
       >
-        <Badge title={title} />
+        <TopBadges title={title} />
+        <SideBadges title={title} />
         <Image
           src={title.backdrop || '/placeholder.svg'}
           alt={title.title}
@@ -197,6 +220,7 @@ export function RankedCard({ title, rank }: { title: Title; rank: number }) {
         {rank}
       </span>
       <div className="relative -ml-6 aspect-[2/3] h-full overflow-hidden rounded-md ring-1 ring-white/10">
+        <SideBadges title={title} />
         <Image
           src={title.poster || '/placeholder.svg'}
           alt={title.title}
