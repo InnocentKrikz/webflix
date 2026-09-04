@@ -1,4 +1,5 @@
-const TMDB_BASE_URL = "https://api.themoviedb.org/3";
+//Proxy to Backend URL  
+const TMDB_BASE_URL = "https://2297-20-61-127-55.ngrok-free.app";
 
 async function tmdbFetch<T>(
   endpoint: string,
@@ -15,42 +16,42 @@ async function tmdbFetch<T>(
       },
     }
   );
-
+console.log(`${TMDB_BASE_URL}${endpoint}`)
   if (!response.ok) {
     throw new Error(
       `TMDB request failed: ${response.status} ${response.statusText}`
     );
   }
-
-  return response.json();
+const data= await (await response.json()).results
+//console.log(data)
+  return data
 }
 
 export const tmdb = {
-  movie(id: number) {
-    return tmdbFetch(`/movie/${id}?append_to_response=credits,videos`);
-  },
-
   movies: {
     details(id: number) {
-      return tmdbFetch(`/movie/${id}?append_to_response=credits,videos`);
+      return tmdbFetch(`/movies/${id}`);
     },
     popular() {
-      return tmdbFetch(`/movie/popular`);
+      return tmdbFetch(`/movies/popular`);
     },
     nowPlaying() {
-      return tmdbFetch(`/movie/now_playing`);
+      return tmdbFetch(`/movies/now-playing`);
     },
     topRated() {
-      return tmdbFetch(`/movie/top_rated`);
+      return tmdbFetch(`/movies/top`);
     },
     trending(timeWindow = "day") {
-      return tmdbFetch(`/trending/movie/${timeWindow}`);
+      return tmdbFetch(`/movies/trending/${timeWindow}`);
+    },
+    upcoming() {
+      return tmdbFetch(`/movies/upcoming`);
     },
   },
 
   tv: {
     details(id: number) {
-      return tmdbFetch(`/tv/${id}?append_to_response=credits,videos`);
+      return tmdbFetch(`/tv/${id}`);
     },
     seasonDetails(id: number, seasonNumber: number) {
       return tmdbFetch(`/tv/${id}/season/${seasonNumber}`);
@@ -59,13 +60,16 @@ export const tmdb = {
       return tmdbFetch(`/tv/popular`);
     },
     nowPlaying() {
-      return tmdbFetch(`/tv/on_the_air`);
+      return tmdbFetch(`/tv/airing-today`);
     },
     topRated() {
-      return tmdbFetch(`/tv/top_rated`);
+      return tmdbFetch(`/tv/top`);
     },
     trending(timeWindow = "day") {
-      return tmdbFetch(`/trending/tv/${timeWindow}`);
+      return tmdbFetch(`/tv/trending/${timeWindow}`);
+    },
+     upcoming() {
+      return tmdbFetch(`/tv/upcoming`);
     },
   },
 
@@ -77,19 +81,13 @@ export const tmdb = {
       return tmdbFetch(`/trending/movie/${timeWindow}`);
     },
     tv(timeWindow = "day") {
-      return tmdbFetch(`/trending/tv/${timeWindow}`);
+      return tmdbFetch(`/trending/tv/${timeWindow} `);
     },
   },
 
   featured: {
     all() {
-      return tmdbFetch(`/trending/all/day`);
-    },
-    movies() {
-      return tmdbFetch(`/trending/movie/day`);
-    },
-    tv() {
-      return tmdbFetch(`/trending/tv/day`);
+      return tmdbFetch(`/discover`);
     },
   },
 
