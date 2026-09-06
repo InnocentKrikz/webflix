@@ -220,6 +220,7 @@ export function RankedCard({ title, rank }: { title: Title; rank: number }) {
         {rank}
       </span>
       <div className="relative -ml-6 aspect-[2/3] h-full overflow-hidden rounded-md ring-1 ring-white/10">
+        <TopBadges title={title} />
         <SideBadges title={title} />
         <Image
           src={title.poster || '/placeholder.svg'}

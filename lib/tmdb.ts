@@ -1,5 +1,5 @@
 //Proxy to Backend URL  
-const TMDB_BASE_URL = "https://a726-20-61-127-55.ngrok-free.app";
+const TMDB_BASE_URL = "https://1096-20-61-126-208.ngrok-free.app";
 
 async function tmdbFetch<T>(
   endpoint: string,
