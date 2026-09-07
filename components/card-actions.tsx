@@ -1,10 +1,12 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { Check, ChevronDown, Play, Plus, ThumbsUp } from 'lucide-react'
+import { Check, ChevronDown, Play, Plus } from 'lucide-react'
+import { RatingButton } from '@/components/rating-button'
 import { useModal, useMyList } from '@/components/providers'
 import { cn } from '@/lib/utils'
 import type { Title } from '@/lib/types'
+import { isTitleReleased } from '@/lib/availability'
 
 function RoundButton({
   children,
@@ -44,21 +46,22 @@ export function CardActions({ title, compact }: { title: Title; compact?: boolea
   const { open } = useModal()
   const { has, toggle } = useMyList()
   const inList = has(title.id)
+  const released = isTitleReleased(title)
+  const progress = title.watchProgress
+  const watchHref = progress && title.type === 'tv' && progress.seasonNumber && progress.episodeNumber
+    ? `/watch/${title.slug}?s=${progress.seasonNumber}&e=${progress.episodeNumber}`
+    : `/watch/${title.slug}`
 
   return (
-    <div className="flex items-center gap-1.5">
-      <RoundButton label="Play" primary onClick={() => router.push(`/watch/${title.slug}`)}>
+    <div className="flex items-center gap-1.5 px-1 pb-1">
+      {released ? <RoundButton label="Play" primary onClick={() => router.push(watchHref)}>
         <Play className={cn('fill-background', compact ? 'size-3.5' : 'size-4')} />
-      </RoundButton>
+      </RoundButton> : <span className="rounded-full bg-white/10 px-2 py-1 text-[10px] font-semibold">Coming Soon</span>}
       <RoundButton label={inList ? 'Remove from My List' : 'Add to My List'} onClick={() => toggle(title.id)}>
         {inList ? <Check className="size-4 text-primary" /> : <Plus className="size-4" />}
       </RoundButton>
-      {!compact && (
-        <RoundButton label="Rate" onClick={() => open(title.id)}>
-          <ThumbsUp className="size-4" />
-        </RoundButton>
-      )}
-      <RoundButton label="More info" className="ml-auto" onClick={() => open(title.id)}>
+      {released && <RatingButton id={title.id} />}
+      <RoundButton label="More info" className="ml-auto mr-1" onClick={() => open(title.id)}>
         <ChevronDown className="size-4" />
       </RoundButton>
     </div>

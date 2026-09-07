@@ -8,6 +8,7 @@ import { Info, Play, Plus, Check, Volume2, VolumeX } from 'lucide-react'
 import { useModal, useMyList } from '@/components/providers'
 import { Dot, MaturityBadge, RatingStar } from '@/components/pieces'
 import type { Title } from '@/lib/types'
+import { isTitleReleased } from '@/lib/availability'
 
 export function Hero({ titles }: { titles: Title[] }) {
   const [index, setIndex] = useState(0)
@@ -81,9 +82,21 @@ export function Hero({ titles }: { titles: Title[] }) {
               </span>
             </div>
 
-            <h1 className="font-display text-4xl font-extrabold leading-[0.95] tracking-tight text-balance text-glow md:text-7xl">
-              {title.title}
-            </h1>
+            {title.logo ? (
+              <div className="relative h-20 w-full max-w-[34rem] md:h-32 md:max-2xl:h-24" role="img" aria-label={title.title}>
+                <Image
+                  src={title.logo}
+                  alt={title.title}
+                  fill
+                  sizes="(max-width: 768px) 80vw, 34rem"
+                  className="object-contain object-left"
+                />
+              </div>
+            ) : (
+              <h1 className="font-display text-4xl font-extrabold leading-[0.95] tracking-tight text-balance text-glow md:text-7xl md:max-2xl:text-6xl">
+                {title.title}
+              </h1>
+            )}
 
             <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm md:text-base">
               <RatingStar rating={title.rating} />
@@ -105,13 +118,13 @@ export function Hero({ titles }: { titles: Title[] }) {
             </p>
 
             <div className="mt-7 flex flex-wrap items-center gap-3">
-              <button
+              {isTitleReleased(title) ? <button
                 onClick={() => router.push(`/watch/${title.slug}`)}
                 className="group inline-flex items-center gap-2 rounded-full bg-foreground px-7 py-3 font-semibold text-background transition-transform hover:scale-[1.03] active:scale-95"
               >
                 <Play className="size-5 fill-background" />
                 Play
-              </button>
+              </button> : <span className="rounded-full bg-white/15 px-7 py-3 font-semibold">Coming Soon</span>}
               <button
                 onClick={() => open(title.id)}
                 className="inline-flex items-center gap-2 rounded-full bg-white/15 px-6 py-3 font-semibold text-foreground backdrop-blur transition-colors hover:bg-white/25"
@@ -160,13 +173,13 @@ export function Hero({ titles }: { titles: Title[] }) {
 
       {/* right controls: mute + maturity */}
       <div className="absolute bottom-24 right-4 z-10 flex items-center gap-3 md:bottom-28 md:right-8">
-        <button
+        {/* <button
           onClick={() => setMuted((m) => !m)}
           aria-label={muted ? 'Unmute' : 'Mute'}
           className="grid size-10 place-items-center rounded-full border border-white/30 text-foreground/90 transition-colors hover:border-white/70"
         >
           {muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
-        </button>
+        </button> */}
         <div className="border-l-2 border-primary bg-black/40 py-1 pl-3 pr-6 text-sm font-medium backdrop-blur">
           {title.maturity}
         </div>

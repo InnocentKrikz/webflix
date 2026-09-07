@@ -6,25 +6,34 @@ import { Bookmark } from 'lucide-react'
 import { CatalogHydrator } from '@/components/catalog-hydrator'
 import { PageShell } from '@/components/page-shell'
 import { BrowseGrid } from '@/components/browse-grid'
+import { PageLoading } from '@/components/page-loading'
 import { useMyList } from '@/components/providers'
 import type { Title } from '@/lib/types'
 
 export default function MyListPage() {
   const { ids } = useMyList()
   const [titles, setTitles] = useState<Title[]>([])
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     if (ids.length === 0) {
       setTitles([])
+      setLoading(false)
       return
     }
 
     const controller = new AbortController()
+    setLoading(true)
     const params = new URLSearchParams({ ids: ids.join(',') })
     fetch(`/api/titles?${params.toString()}`, { signal: controller.signal })
       .then((response) => (response.ok ? response.json() : []))
       .then((nextTitles: Title[]) => setTitles(nextTitles))
-      .catch(() => setTitles([]))
+      .catch(() => {
+        if (!controller.signal.aborted) setTitles([])
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false)
+      })
 
     return () => controller.abort()
   }, [ids])
@@ -45,10 +54,14 @@ export default function MyListPage() {
           <h1 className="font-display text-3xl font-extrabold tracking-tight md:text-4xl">My List</h1>
         </motion.div>
 
-        <BrowseGrid
-          titles={titles}
-          emptyLabel="Titles you save will show up here. Tap the + on any movie or show to add it to My List."
-        />
+        {loading ? (
+          <PageLoading label="Loading your list" />
+        ) : (
+          <BrowseGrid
+            titles={titles}
+            emptyLabel="Titles you save will show up here. Tap the + on any movie or show to add it to My List."
+          />
+        )}
       </div>
     </PageShell>
   )

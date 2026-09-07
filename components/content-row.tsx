@@ -1,16 +1,19 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { LandscapeCard, PortraitCard, RankedCard } from '@/components/media-card'
+import { ShowcaseRow } from '@/components/showcase-row'
 import { cn } from '@/lib/utils'
 import type { Row } from '@/lib/types'
 
 function Toggle({
+  groupId,
   value,
   onChange,
 }: {
+  groupId: string
   value: 'movie' | 'tv'
   onChange: (v: 'movie' | 'tv') => void
 }) {
@@ -24,7 +27,7 @@ function Toggle({
         >
           {value === opt && (
             <motion.span
-              layoutId={`toggle-${opt === 'movie' ? 'a' : 'b'}`}
+              layoutId={`toggle-${groupId}-${opt}`}
               className="absolute inset-0 -z-10 rounded-full bg-foreground"
               transition={{ type: 'spring', stiffness: 400, damping: 30 }}
             />
@@ -38,13 +41,17 @@ function Toggle({
   )
 }
 
-export function ContentRow({ row }: { row: Row }) {
+function StandardContentRow({ row }: { row: Row }) {
   const scroller = useRef<HTMLDivElement>(null)
   const [filter, setFilter] = useState<'movie' | 'tv'>('movie')
+  const [canScrollLeft, setCanScrollLeft] = useState(false)
+  const [canScrollRight, setCanScrollRight] = useState(false)
 
   const variant = row.filterable ? row.variants?.[filter] : undefined
   const title = variant?.title ?? row.title
   const kind = variant?.kind ?? row.kind
+  const addLogo = variant?.addLogo ?? row.addLogo ?? false
+  const addText = variant?.addText ?? row.addText ?? true
   let titles = variant?.titles ?? row.titles
   if (row.filterable && !variant) titles = titles.filter((t) => t.type === filter)
 
@@ -54,33 +61,53 @@ export function ContentRow({ row }: { row: Row }) {
     el.scrollBy({ left: dir * el.clientWidth * 0.85, behavior: 'smooth' })
   }
 
+  const updateScrollState = useCallback(() => {
+    const el = scroller.current
+    if (!el) return
+
+    const maxScrollLeft = Math.max(0, el.scrollWidth - el.clientWidth)
+    setCanScrollLeft(el.scrollLeft > 1)
+    setCanScrollRight(el.scrollLeft < maxScrollLeft - 1)
+  }, [])
+
+  useEffect(() => {
+    const el = scroller.current
+    if (!el) return
+
+    updateScrollState()
+    const observer = new ResizeObserver(updateScrollState)
+    observer.observe(el)
+
+    return () => observer.disconnect()
+  }, [filter, row.id, titles.length, updateScrollState])
+
   if (titles.length === 0) return null
 
   return (
-    <section className="group/row relative py-3">
-      <div className="mb-2 flex items-center gap-3 px-4 md:px-12">
+    <section className="group/row relative py-3 md:max-2xl:py-2">
+      <div className="mb-2 flex items-center gap-3 px-4 md:px-12 md:max-2xl:mb-1 md:max-2xl:px-8">
         <h2 className="relative flex items-center gap-2 font-heading text-lg font-bold md:text-xl">
           <span className="h-5 w-1 rounded-full bg-primary" />
           {title}
         </h2>
-        {row.filterable && <Toggle value={filter} onChange={setFilter} />}
+        {row.filterable && <Toggle groupId={row.id} value={filter} onChange={setFilter} />}
       </div>
 
-      <div className="relative">
-        <button
-          onClick={() => scroll(-1)}
-          aria-label="Scroll left"
-          className="absolute left-0 top-0 z-30 hidden h-full w-12 items-center justify-center bg-gradient-to-r from-background to-transparent opacity-0 transition-opacity group-hover/row:opacity-100 md:flex"
-        >
-          <ChevronLeft className="size-8 transition-transform hover:scale-125" />
-        </button>
+      <div className="relative mx-4 overflow-hidden md:mx-12 md:max-2xl:mx-8">
+        {canScrollLeft && (
+          <button
+            onClick={() => scroll(-1)}
+            aria-label="Scroll left"
+            className="absolute left-0 top-0 z-30 hidden h-full w-12 items-center justify-center bg-gradient-to-r from-background to-transparent opacity-0 transition-opacity group-hover/row:opacity-100 md:flex"
+          >
+            <ChevronLeft className="size-8 transition-transform hover:scale-125" />
+          </button>
+        )}
 
         <div
           ref={scroller}
-          className={cn(
-            'no-scrollbar flex gap-2.5 overflow-x-auto scroll-smooth px-4 pb-8 pt-2 md:gap-3 md:px-12',
-            kind === 'ranked' && 'items-end',
-          )}
+          onScroll={updateScrollState}
+          className={cn('no-scrollbar relative flex gap-2.5 overflow-x-auto overscroll-x-contain scroll-smooth pb-8 pt-2 md:gap-3 md:max-2xl:gap-2.5 md:max-2xl:pb-6 md:max-2xl:pt-1', kind === 'ranked' && 'items-end')}
         >
           <AnimatePresence mode="popLayout">
             {titles.map((t, i) => (
@@ -93,25 +120,31 @@ export function ContentRow({ row }: { row: Row }) {
                 transition={{ delay: Math.min(i * 0.04, 0.4) }}
               >
                 {kind === 'ranked' ? (
-                  <RankedCard title={t} rank={i + 1} />
+                  <RankedCard title={t} rank={i + 1} addLogo={addLogo} addText={addText} />
                 ) : kind === 'top10' ? (
-                  <PortraitCard title={t} />
+                  <PortraitCard title={t} addLogo={addLogo} addText={addText} />
                 ) : (
-                  <LandscapeCard title={t} />
+                  <LandscapeCard title={t} addLogo={addLogo} addText={addText} />
                 )}
               </motion.div>
             ))}
           </AnimatePresence>
         </div>
 
-        <button
-          onClick={() => scroll(1)}
-          aria-label="Scroll right"
-          className="absolute right-0 top-0 z-30 hidden h-full w-12 items-center justify-center bg-gradient-to-l from-background to-transparent opacity-0 transition-opacity group-hover/row:opacity-100 md:flex"
-        >
-          <ChevronRight className="size-8 transition-transform hover:scale-125" />
-        </button>
+        {canScrollRight && (
+          <button
+            onClick={() => scroll(1)}
+            aria-label="Scroll right"
+            className="absolute right-0 top-0 z-30 hidden h-full w-12 items-center justify-center bg-gradient-to-l from-background to-transparent opacity-0 transition-opacity group-hover/row:opacity-100 md:flex"
+          >
+            <ChevronRight className="size-8 transition-transform hover:scale-125" />
+          </button>
+        )}
       </div>
     </section>
   )
+}
+
+export function ContentRow({ row }: { row: Row }) {
+  return row.kind === 'showcase' ? <ShowcaseRow row={row} /> : <StandardContentRow row={row} />
 }

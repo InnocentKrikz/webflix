@@ -1,6 +1,8 @@
 import { notFound } from 'next/navigation'
 import { VideoPlayer } from '@/components/video-player'
-import { getBySlug } from '@/lib/data'
+import { getWatchTitle } from '@/lib/data'
+import { resolvePlayback } from '@/lib/availability'
+import { ComingSoon } from '@/components/coming-soon'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,15 +15,21 @@ export default async function WatchPage({
 }) {
   const { slug } = await params
   const { s, e } = await searchParams
-  const title = await getBySlug(slug)
+  if ((s !== undefined && !/^[1-9]\d*$/.test(s)) || (e !== undefined && !/^[1-9]\d*$/.test(e))) notFound()
+  const seasonNumber = s ? Number(s) : undefined
+  const episodeNumber = e ? Number(e) : undefined
+  const title = await getWatchTitle(slug, seasonNumber)
 
   if (!title) notFound()
+  if (!resolvePlayback(title, seasonNumber, episodeNumber)) {
+    return <ComingSoon title={title} seasonNumber={seasonNumber} episodeNumber={episodeNumber} />
+  }
 
   return (
     <VideoPlayer
       title={title}
-      initialSeason={s ? Number(s) : undefined}
-      initialEpisode={e ? Number(e) : undefined}
+      initialSeason={seasonNumber}
+      initialEpisode={episodeNumber}
     />
   )
 }

@@ -32,7 +32,7 @@ export function BrowseGrid({ titles, emptyLabel }: { titles: Title[]; emptyLabel
             exit={{ opacity: 0, scale: 0.92 }}
             transition={{ duration: 0.3, delay: Math.min(i * 0.03, 0.3) }}
           >
-            <PortraitCard title={t} className="w-full sm:w-full md:w-full" />
+            <PortraitCard title={t} artworkOnly className="w-full sm:w-full md:w-full" />
           </motion.div>
         ))}
       </AnimatePresence>

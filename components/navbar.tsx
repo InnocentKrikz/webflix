@@ -7,13 +7,17 @@ import { AnimatePresence, motion } from 'framer-motion'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { Bell, ChevronDown, Menu, Search, User, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { authClient } from '@/lib/auth-client'
+import { useCatalog, useModal } from '@/components/providers'
+import { PortraitCard } from '@/components/media-card'
+import type { Title } from '@/lib/types'
 
 const NAV_LINKS = [
   { label: 'Home', href: '/' },
   { label: 'TV Shows', href: '/tv-shows' },
   { label: 'Movies', href: '/movies' },
-  { label: 'Anime', href: '/browse?genre=Animation' },
-  { label: 'Live TV', href: '/browse?tab=live' },
+  //{ label: 'Anime', href: '/browse?genre=Animation' },
+  //{ label: 'Live TV', href: '/browse?tab=live' },
   { label: 'My List', href: '/my-list' },
   { label: 'Browse', href: '/browse' },
 ]
@@ -24,8 +28,13 @@ export function Navbar() {
   const [scrolled, setScrolled] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [query, setQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<Title[]>([])
+  const [searchLoading, setSearchLoading] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const { data: session } = authClient.useSession()
+  const { registerTitles } = useCatalog()
+  const { open: openModal } = useModal()
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 24)
@@ -38,10 +47,54 @@ export function Navbar() {
     if (searchOpen) inputRef.current?.focus()
   }, [searchOpen])
 
+  useEffect(() => {
+    const trimmed = query.trim()
+    if (!searchOpen || trimmed.length < 2) {
+      setSearchResults([])
+      setSearchLoading(false)
+      return
+    }
+
+    const controller = new AbortController()
+    const timeout = setTimeout(() => {
+      setSearchLoading(true)
+      fetch(`/api/titles?query=${encodeURIComponent(trimmed)}`, { signal: controller.signal })
+        .then((response) => (response.ok ? response.json() : []))
+        .then((nextTitles: Title[]) => {
+          if (controller.signal.aborted) return
+          const topResults = nextTitles.slice(0, 5)
+          setSearchResults(topResults)
+          registerTitles(topResults)
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) setSearchResults([])
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setSearchLoading(false)
+        })
+    }, 220)
+
+    return () => {
+      clearTimeout(timeout)
+      controller.abort()
+    }
+  }, [query, registerTitles, searchOpen])
+
   function submitSearch(e: React.FormEvent) {
     e.preventDefault()
-    if (query.trim()) router.push(`/search?q=${encodeURIComponent(query.trim())}`)
+    if (query.trim()) {
+      setSearchOpen(false)
+      router.push(`/search?q=${encodeURIComponent(query.trim())}`)
+    }
   }
+
+  async function signOut() {
+    await authClient.signOut()
+    router.refresh()
+  }
+
+  const userName = session?.user.name || 'Webflix User'
+  const userInitial = userName.trim().charAt(0).toUpperCase() || 'W'
 
   return (
     <header
@@ -94,7 +147,7 @@ export function Navbar() {
 
         <div className="ml-auto flex items-center gap-1 md:gap-2">
           {/* Search */}
-          <form onSubmit={submitSearch} className="flex items-center">
+          <form onSubmit={submitSearch} className="relative flex items-center">
             <AnimatePresence initial={false}>
               {searchOpen && (
                 <motion.input
@@ -106,7 +159,7 @@ export function Navbar() {
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onBlur={() => !query && setSearchOpen(false)}
-                  placeholder="Titles, people, genres"
+                  placeholder="Search..."
                   className="mr-1 h-9 rounded-full border border-white/15 bg-black/60 px-4 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary"
                 />
               )}
@@ -119,22 +172,64 @@ export function Navbar() {
             >
               <Search className="size-5" />
             </button>
+            <AnimatePresence>
+              {searchOpen && query.trim().length >= 2 && (
+                <motion.div
+                  initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                  transition={{ duration: 0.16 }}
+                  className="absolute right-0 top-11 z-[60] max-h-[65vh] w-[min(24rem,calc(100vw-2rem))] overflow-y-auto rounded-xl border border-white/10 bg-popover p-2 shadow-2xl"
+                >
+                  {searchLoading ? (
+                    <div className="px-3 py-5 text-center text-sm text-muted-foreground">Searching…</div>
+                  ) : searchResults.length > 0 ? (
+                    <>
+                      <div className="grid grid-cols-3 gap-2">
+                        {searchResults.map((title) => (
+                          <PortraitCard
+                            key={title.id}
+                            title={title}
+                            artworkOnly
+                            preview={false}
+                            className="w-full sm:w-full md:w-full"
+                            onSelect={() => {
+                              openModal(title.id)
+                              setSearchOpen(false)
+                            }}
+                          />
+                        ))}
+                      </div>
+                      <Link
+                        href={`/search?q=${encodeURIComponent(query.trim())}`}
+                        onClick={() => setSearchOpen(false)}
+                        className="mt-2 block border-t border-white/10 px-2 pt-3 text-center text-sm font-semibold text-primary transition-colors hover:text-primary/80"
+                      >
+                        More results for “{query.trim()}”
+                      </Link>
+                    </>
+                  ) : (
+                    <div className="px-3 py-5 text-center text-sm text-muted-foreground">No matches found</div>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </form>
 
-          <button
+          {/* <button
             aria-label="Notifications"
             className="relative hidden size-9 place-items-center rounded-full text-foreground transition-colors hover:bg-white/10 sm:grid"
           >
             <Bell className="size-5" />
             <span className="absolute right-2 top-2 size-2 rounded-full bg-primary ring-2 ring-background" />
-          </button>
+          </button> */}
 
           {/* Profile */}
           <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>
-              <button className="flex items-center gap-1 rounded-full p-1 outline-none transition-colors hover:bg-white/10">
+              <button className="flex items-center gap-1 rounded-sm p-1 outline-none transition-colors hover:bg-white/10">
                 <span className="grid size-8 place-items-center rounded-md bg-gradient-to-br from-primary to-red-800 text-sm font-bold text-primary-foreground">
-                  W
+                  {userInitial}
                 </span>
                 <ChevronDown className="hidden size-4 text-muted-foreground sm:block" />
               </button>
@@ -143,18 +238,27 @@ export function Navbar() {
               <DropdownMenu.Content
                 sideOffset={12}
                 align="end"
-                className="z-[60] w-56 rounded-xl border border-white/10 bg-popover/95 p-1.5 shadow-2xl backdrop-blur-xl data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
+                className="z-[60] w-56 rounded-xl border border-white/10 bg-popover/25 p-1.5 shadow-2xl backdrop-blur-xl data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
               >
                 <div className="flex items-center gap-3 px-2 py-2">
                   <span className="grid size-9 place-items-center rounded-md bg-gradient-to-br from-primary to-red-800 font-bold text-primary-foreground">
-                    W
+                    {userInitial}
                   </span>
                   <div className="leading-tight">
-                    <p className="text-sm font-semibold">Webflix User</p>
-                    <p className="text-xs text-muted-foreground">Premium 4K</p>
+                    <p className="max-w-36 truncate text-sm font-semibold">{userName}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {(session?.user as { plan?: string } | undefined)?.plan === 'PREMIUM'
+                        ? 'Premium 4K'
+                        : 'Free plan'}
+                    </p>
                   </div>
                 </div>
                 <DropdownMenu.Separator className="my-1 h-px bg-white/10" />
+                {!session && (
+                  <DropdownMenu.Item asChild className="cursor-pointer rounded-lg px-2 py-2 text-sm font-semibold text-primary outline-none transition-colors data-[highlighted]:bg-primary/10">
+                    <Link href="/auth">Quick sign in</Link>
+                  </DropdownMenu.Item>
+                )}
                 {['Manage Profiles', 'Account', 'Help Center'].map((item) => (
                   <DropdownMenu.Item
                     key={item}
@@ -164,9 +268,18 @@ export function Navbar() {
                   </DropdownMenu.Item>
                 ))}
                 <DropdownMenu.Separator className="my-1 h-px bg-white/10" />
-                <DropdownMenu.Item className="cursor-pointer rounded-lg px-2 py-2 text-sm text-primary outline-none transition-colors data-[highlighted]:bg-primary/10">
-                  Sign out of Webflix
-                </DropdownMenu.Item>
+                {session ? (
+                  <DropdownMenu.Item
+                    onSelect={signOut}
+                    className="cursor-pointer rounded-lg px-2 py-2 text-sm text-primary outline-none transition-colors data-[highlighted]:bg-primary/10"
+                  >
+                    Sign out of Webflix
+                  </DropdownMenu.Item>
+                ) : (
+                  <DropdownMenu.Item asChild className="cursor-pointer rounded-lg px-2 py-2 text-sm text-primary outline-none transition-colors data-[highlighted]:bg-primary/10">
+                    <Link href="/auth">Sign in to Webflix</Link>
+                  </DropdownMenu.Item>
+                )}
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
           </DropdownMenu.Root>

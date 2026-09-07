@@ -5,6 +5,7 @@ import { motion } from 'framer-motion'
 import { CatalogHydrator } from '@/components/catalog-hydrator'
 import { BrowseGrid } from '@/components/browse-grid'
 import { GenreChips, SortSelect, TypeToggle, type SortOption } from '@/components/filter-bar'
+import { BrowseGridSkeleton } from '@/components/title-browser-skeleton'
 import type { MediaType, Title } from '@/lib/types'
 
 type BrowserType = MediaType | 'all'
@@ -34,8 +35,12 @@ export function TitleBrowser({
 
     fetch(`/api/genres?${params.toString()}`, { signal: controller.signal })
       .then((response) => (response.ok ? response.json() : []))
-      .then((nextGenres: string[]) => setGenres(nextGenres))
-      .catch(() => setGenres([]))
+      .then((nextGenres: string[]) => {
+        if (!controller.signal.aborted) setGenres(nextGenres)
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setGenres([])
+      })
 
     return () => controller.abort()
   }, [fixedType])
@@ -50,9 +55,15 @@ export function TitleBrowser({
     setLoading(true)
     fetch(`/api/titles?${params.toString()}`, { signal: controller.signal })
       .then((response) => (response.ok ? response.json() : []))
-      .then((nextTitles: Title[]) => setTitles(nextTitles))
-      .catch(() => setTitles([]))
-      .finally(() => setLoading(false))
+      .then((nextTitles: Title[]) => {
+        if (!controller.signal.aborted) setTitles(nextTitles)
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setTitles([])
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false)
+      })
 
     return () => controller.abort()
   }, [fixedType, genre, sort, type])
@@ -78,11 +89,7 @@ export function TitleBrowser({
       </div>
 
       {loading ? (
-        <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7">
-          {Array.from({ length: 14 }).map((_, index) => (
-            <div key={index} className="aspect-[2/3] animate-pulse rounded-md bg-secondary" />
-          ))}
-        </div>
+        <BrowseGridSkeleton />
       ) : (
         <BrowseGrid titles={titles} emptyLabel={emptyLabel} />
       )}

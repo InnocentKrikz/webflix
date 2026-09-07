@@ -28,10 +28,14 @@ import {
   X,
 } from 'lucide-react'
 import { cn, formatTime, parseDurationToSeconds } from '@/lib/utils'
+import { authClient } from '@/lib/auth-client'
+import { isEpisodeReleased, isSeasonReleased, nextPlaybackTarget, resolvePlayback, type PlaybackTarget } from '@/lib/availability'
+import { ComingSoon } from '@/components/coming-soon'
 import type { Episode, Season, Title } from '@/lib/types'
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2]
 const QUALITIES = ['Auto', '4K', '1080p', '720p', '480p']
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:3005'
 
 export function VideoPlayer({
   title,
@@ -42,19 +46,25 @@ export function VideoPlayer({
   initialSeason?: number
   initialEpisode?: number
 }) {
+  const target = resolvePlayback(title, initialSeason, initialEpisode)
+  if (!target) return <ComingSoon title={title} seasonNumber={initialSeason} episodeNumber={initialEpisode} />
+  return <PlayableVideoPlayer key={`${title.id}:${target.seasonIndex}:${target.episodeIndex}`} title={title} initialTarget={target} />
+}
+
+function PlayableVideoPlayer({ title, initialTarget }: { title: Title; initialTarget: PlaybackTarget }) {
   const router = useRouter()
+  const { data: session } = authClient.useSession()
+  const currentSessionUser = useRef(session?.user.id)
+  currentSessionUser.current = session?.user.id
   const containerRef = useRef<HTMLDivElement>(null)
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const isTV = title.type === 'tv' && Boolean(title.seasons?.length)
 
-  const [seasonIdx, setSeasonIdx] = useState(
-    Math.min(Math.max((initialSeason ?? 1) - 1, 0), (title.seasons?.length ?? 1) - 1),
-  )
+  const [seasonIdx, setSeasonIdx] = useState(initialTarget.seasonIndex)
+  const [drawerSeasonIdx, setDrawerSeasonIdx] = useState(initialTarget.seasonIndex)
   const season: Season | undefined = title.seasons?.[seasonIdx]
-  const [episodeIdx, setEpisodeIdx] = useState(
-    Math.min(Math.max((initialEpisode ?? 1) - 1, 0), (season?.episodes.length ?? 1) - 1),
-  )
+  const [episodeIdx, setEpisodeIdx] = useState(initialTarget.episodeIndex)
   const episode: Episode | undefined = season?.episodes[episodeIdx]
 
   const [playing, setPlaying] = useState(true)
@@ -68,6 +78,9 @@ export function VideoPlayer({
   const [quality, setQuality] = useState('Auto')
   const [dismissedNext, setDismissedNext] = useState(false)
   const [seeking, setSeeking] = useState(false)
+  const [progressLoaded, setProgressLoaded] = useState(false)
+  const loadedProgressKey = useRef<string | null>(null)
+  const lastSavedProgress = useRef('')
 
   const duration = useMemo(
     () => (isTV && episode ? parseDurationToSeconds(episode.duration) : parseDurationToSeconds(title.runtime)),
@@ -76,31 +89,125 @@ export function VideoPlayer({
 
   const backdrop = isTV && episode ? episode.still : title.backdrop
 
+  const tmdbId = Number(title.id.split('-').at(-1))
+  const mediaType = title.type === 'tv' ? 'TV' : 'MOVIE'
+  const progressKey = `${session?.user.id}:${title.id}:${isTV ? season?.number ?? seasonIdx + 1 : ''}:${isTV ? episode?.number ?? episodeIdx + 1 : ''}`
+
+  const saveProgress = useCallback((completed = false) => {
+    if (!session || currentSessionUser.current !== session.user.id || !progressLoaded || loadedProgressKey.current !== progressKey || !Number.isFinite(tmdbId) || currentTime <= 0) return
+    const signature = `${progressKey}:${Math.floor(currentTime)}:${duration}`
+    if (lastSavedProgress.current === signature) return
+    lastSavedProgress.current = signature
+    void fetch(`${BACKEND_URL}/progress`, {
+      method: 'PUT',
+      credentials: 'include',
+      keepalive: true,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mediaType,
+        tmdbId,
+        seasonNumber: isTV ? season?.number ?? seasonIdx + 1 : null,
+        episodeNumber: isTV ? episode?.number ?? episodeIdx + 1 : null,
+        progressSeconds: currentTime,
+        durationSeconds: duration,
+        completed,
+      }),
+    }).then((response) => {
+      if (!response.ok) throw new Error('Progress was not saved')
+      window.dispatchEvent(new Event('webflix:activity'))
+    }).catch(() => {
+      if (lastSavedProgress.current === signature) lastSavedProgress.current = ''
+    })
+  }, [session, progressLoaded, progressKey, tmdbId, mediaType, isTV, season, seasonIdx, episode, episodeIdx, currentTime, duration])
+
+  useEffect(() => {
+    if (!session || !Number.isFinite(tmdbId)) {
+      setProgressLoaded(true)
+      return
+    }
+
+    let cancelled = false
+    setProgressLoaded(false)
+    const params = new URLSearchParams({ mediaType, tmdbId: String(tmdbId) })
+    if (isTV) {
+      params.set('seasonNumber', String(season?.number ?? seasonIdx + 1))
+      params.set('episodeNumber', String(episode?.number ?? episodeIdx + 1))
+    }
+    fetch(`${BACKEND_URL}/progress?${params.toString()}`, { credentials: 'include' })
+      .then((response) => {
+        if (!response.ok) throw new Error('Unable to load progress')
+        return response.json()
+      })
+      .then((payload: { progress?: { progressSeconds?: number } } | null) => {
+        if (cancelled) return
+        setCurrentTime(Math.max(0, Math.min(duration, Number(payload?.progress?.progressSeconds ?? 0))))
+        loadedProgressKey.current = progressKey
+        setProgressLoaded(true)
+      })
+      .catch(() => {
+        if (!cancelled) setProgressLoaded(true)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [session?.user.id, progressKey, tmdbId, mediaType, isTV, season?.number, seasonIdx, episode?.number, episodeIdx, duration])
+
+  const latestSave = useRef(saveProgress)
+  useEffect(() => {
+    latestSave.current = saveProgress
+  }, [saveProgress])
+
+  useEffect(() => {
+    if (!session?.user.id) return
+    const save = () => latestSave.current()
+    const hidden = () => { if (document.visibilityState === 'hidden') save() }
+    const timer = setInterval(save, 15_000)
+    window.addEventListener('pagehide', save)
+    document.addEventListener('visibilitychange', hidden)
+    return () => {
+      clearInterval(timer)
+      window.removeEventListener('pagehide', save)
+      document.removeEventListener('visibilitychange', hidden)
+      save()
+    }
+  }, [session?.user.id, progressKey])
+
+  useEffect(() => {
+    if (!playing) saveProgress(currentTime >= duration && duration > 0)
+  }, [playing, saveProgress, currentTime, duration])
+
   const nextTarget = useMemo(() => {
-    if (!isTV || !title.seasons || !season) return null
-    if (episodeIdx + 1 < season.episodes.length) return { s: seasonIdx, e: episodeIdx + 1 }
-    if (seasonIdx + 1 < title.seasons.length) return { s: seasonIdx + 1, e: 0 }
-    return null
-  }, [isTV, title.seasons, season, seasonIdx, episodeIdx])
+    if (!isTV) return null
+    const target = nextPlaybackTarget(title, { seasonIndex: seasonIdx, episodeIndex: episodeIdx })
+    return target ? { s: target.seasonIndex, e: target.episodeIndex } : null
+  }, [isTV, title, seasonIdx, episodeIdx])
 
   const nextEpisode = nextTarget && title.seasons ? title.seasons[nextTarget.s].episodes[nextTarget.e] : null
 
   const goTo = useCallback((s: number, e: number) => {
+    const targetSeason = title.seasons?.[s]
+    const targetEpisode = targetSeason?.episodes[e]
+    if (!targetSeason || !targetEpisode || !isEpisodeReleased(title, targetSeason, targetEpisode)) return
+    saveProgress()
     setSeasonIdx(s)
     setEpisodeIdx(e)
     setCurrentTime(0)
     setDismissedNext(false)
     setPlaying(true)
     setShowEpisodes(false)
-  }, [])
+  }, [saveProgress, title])
 
   const playNext = useCallback(() => {
-    if (nextTarget) goTo(nextTarget.s, nextTarget.e)
-  }, [nextTarget, goTo])
+    if (nextTarget) {
+      saveProgress(true)
+      goTo(nextTarget.s, nextTarget.e)
+    }
+  }, [nextTarget, goTo, saveProgress])
 
   // Simulated playback progress
   useEffect(() => {
-    if (!playing) return
+    if (!playing || !progressLoaded) return
     const id = setInterval(() => {
       setCurrentTime((t) => {
         const next = t + 0.25 * speed
@@ -111,7 +218,7 @@ export function VideoPlayer({
       })
     }, 250)
     return () => clearInterval(id)
-  }, [playing, duration, speed])
+  }, [playing, progressLoaded, duration, speed])
 
   useEffect(() => {
     if (currentTime >= duration && duration > 0) {
@@ -123,10 +230,10 @@ export function VideoPlayer({
   const showNextCard = isTV && nextTarget !== null && remaining <= 20 && remaining > 0 && !dismissedNext
 
   useEffect(() => {
-    if (currentTime >= duration && isTV && nextTarget && !dismissedNext) {
+    if (progressLoaded && duration > 0 && currentTime >= duration && isTV && nextTarget && !dismissedNext) {
       playNext()
     }
-  }, [currentTime, duration, isTV, nextTarget, dismissedNext, playNext])
+  }, [progressLoaded, currentTime, duration, isTV, nextTarget, dismissedNext, playNext])
 
   const resetHideTimer = useCallback(() => {
     setShowControls(true)
@@ -459,7 +566,10 @@ export function VideoPlayer({
 
                 {isTV && (
                   <button
-                    onClick={() => setShowEpisodes(true)}
+                    onClick={() => {
+                      setDrawerSeasonIdx(seasonIdx)
+                      setShowEpisodes(true)
+                    }}
                     aria-label="Episodes"
                     className="grid size-9 place-items-center rounded-full transition-colors hover:bg-white/10"
                   >
@@ -554,29 +664,31 @@ export function VideoPlayer({
                     {title.seasons.map((s, i) => (
                       <button
                         key={s.number}
-                        onClick={() => {
-                          setSeasonIdx(i)
-                          setEpisodeIdx(0)
-                        }}
+                        onClick={() => setDrawerSeasonIdx(i)}
                         className={cn(
                           'shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors',
-                          i === seasonIdx ? 'bg-foreground text-background' : 'bg-secondary text-muted-foreground hover:text-foreground',
+                          i === drawerSeasonIdx ? 'bg-foreground text-background' : 'bg-secondary text-muted-foreground hover:text-foreground',
                         )}
                       >
-                        {s.name}
+                        {s.name}{!isSeasonReleased(s) && ' · Coming Soon'}
                       </button>
                     ))}
                   </div>
 
                   <div className="flex-1 overflow-y-auto p-3">
-                    {title.seasons[seasonIdx].episodes.map((ep, i) => {
-                      const active = i === episodeIdx
+                    {title.seasons[drawerSeasonIdx].episodes.length === 0 && (
+                      <p className="p-3 text-sm text-muted-foreground">Episodes are coming soon.</p>
+                    )}
+                    {title.seasons[drawerSeasonIdx].episodes.map((ep, i) => {
+                      const active = drawerSeasonIdx === seasonIdx && i === episodeIdx
+                      const available = isEpisodeReleased(title, title.seasons![drawerSeasonIdx], ep)
                       return (
                         <button
                           key={ep.id}
-                          onClick={() => goTo(seasonIdx, i)}
+                          onClick={() => goTo(drawerSeasonIdx, i)}
+                          disabled={!available}
                           className={cn(
-                            'mb-2 flex w-full items-center gap-3 rounded-lg p-2 text-left transition-colors hover:bg-white/5',
+                            'mb-2 flex w-full items-center gap-3 rounded-lg p-2 text-left transition-colors enabled:hover:bg-white/5 disabled:cursor-not-allowed',
                             active && 'bg-white/10',
                           )}
                         >
@@ -591,9 +703,11 @@ export function VideoPlayer({
                           </div>
                           <div className="min-w-0 flex-1">
                             <p className="line-clamp-1 text-sm font-semibold">{ep.title}</p>
-                            <p className="line-clamp-2 text-xs text-muted-foreground">{ep.description}</p>
+                            <p className={cn('line-clamp-2 text-xs', available ? 'text-muted-foreground' : 'font-semibold text-primary')}>
+                              {available ? ep.description : 'Coming Soon'}
+                            </p>
                           </div>
-                          <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                          {available && <ChevronRight className="size-4 shrink-0 text-muted-foreground" />}
                         </button>
                       )
                     })}

@@ -77,6 +77,33 @@
   body {
     @apply bg-background text-foreground font-sans antialiased;
   }
+
+  /* Keep native scrolling visible but understated across the whole app. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklch, var(--primary) 68%, var(--muted-foreground)) transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: color-mix(in oklch, var(--background) 82%, transparent);
+  }
+
+  *::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 9999px;
+    background: color-mix(in oklch, var(--primary) 68%, var(--muted-foreground));
+    background-clip: padding-box;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--primary);
+    background-clip: padding-box;
+  }
 }
 
 @layer utilities {

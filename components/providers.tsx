@@ -9,6 +9,7 @@ import {
   useState,
 } from 'react'
 import { DetailModal } from '@/components/detail-modal'
+import { MatchProvider } from '@/components/match-provider'
 import type { Title } from '@/lib/types'
 
 /* ----------------------------- My List store ----------------------------- */
@@ -110,8 +111,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <MyListContext.Provider value={myList}>
       <CatalogContext.Provider value={catalogValue}>
         <ModalContext.Provider value={modal}>
-          {children}
-          <DetailModal />
+          <MatchProvider>
+            {children}
+            <DetailModal />
+          </MatchProvider>
         </ModalContext.Provider>
       </CatalogContext.Provider>
     </MyListContext.Provider>

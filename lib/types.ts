@@ -19,6 +19,7 @@ export interface Episode {
   description: string
   duration: string
   still: string
+  releaseDate?: string
 }
 
 export interface Season {
@@ -27,10 +28,13 @@ export interface Season {
   maturity: Maturity
   contentTags: string[]
   episodes: Episode[]
+  releaseDate?: string
+  episodesLoaded?: boolean
 }
 
 export interface Trailer {
   id: string
+  videoKey?: string
   title: string
   kind: 'Trailer' | 'Clip'
   thumbnail: string
@@ -42,6 +46,7 @@ export interface Title {
   title: string
   type: MediaType
   year: number
+  releaseDate?: string
   rating: number
   maturity: Maturity
   quality: Quality
@@ -51,7 +56,9 @@ export interface Title {
   tagline: string
   description: string
   poster: string
+  logo?: string
   backdrop: string
+  upcoming?: boolean
   creator: string
   status: string
   keywords: string[]
@@ -59,16 +66,27 @@ export interface Title {
   seasons?: Season[]
   similar: string[]
   trailers: Trailer[]
+  /** True when this title came from a backend detail-shaped record. */
+  detailsLoaded?: boolean
   badges?: TitleBadge[]
   badge?: TitleBadge
   featured?: boolean
+  watchProgress?: {
+    progressPercent: number
+    progressSeconds: number
+    durationSeconds: number
+    seasonNumber?: number | null
+    episodeNumber?: number | null
+  }
 }
 
 export interface Row {
   id: string
   title: string
-  kind: 'landscape' | 'top10' | 'ranked' | 'billboard'
+  kind: 'landscape' | 'top10' | 'ranked' | 'billboard' | 'showcase'
   titles: Title[]
+  addLogo?: boolean
+  addText?: boolean
   filterable?: boolean
-  variants?: Partial<Record<MediaType, Pick<Row, 'title' | 'kind' | 'titles'>>>
+  variants?: Partial<Record<MediaType, Pick<Row, 'title' | 'kind' | 'titles' | 'addLogo' | 'addText'>>>
 }

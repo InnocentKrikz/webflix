@@ -1,5 +1,7 @@
-//Proxy to Backend URL  
-const TMDB_BASE_URL = "https://1096-20-61-126-208.ngrok-free.app";
+// All catalog requests go through the backend. The backend owns caching through
+// Redis (with a memory fallback), so large catalog responses must not enter
+// Next.js's 2 MB-per-entry Data Cache.
+const TMDB_BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:3005";
 
 async function tmdbFetch<T>(
   endpoint: string,
@@ -9,8 +11,8 @@ async function tmdbFetch<T>(
     `${TMDB_BASE_URL}${endpoint}`,
     {
       ...options,
+      cache: "no-store" as const,
       headers: {
-        Authorization: `Bearer ${process.env.TMDB_API_KEY}`,
         "Content-Type": "application/json",
         ...options?.headers,
       },
@@ -22,9 +24,8 @@ async function tmdbFetch<T>(
       `TMDB request failed: ${response.status} ${response.statusText}`
     );
   }
-const data= await (await response.json()).results
-//console.log(data)
-  return data
+  const payload = await response.json()
+  return (payload?.results ?? payload) as T
 }
 
 export const tmdb = {
@@ -81,7 +82,7 @@ export const tmdb = {
       return tmdbFetch(`/trending/movie/${timeWindow}`);
     },
     tv(timeWindow = "day") {
-      return tmdbFetch(`/trending/tv/${timeWindow} `);
+      return tmdbFetch(`/trending/tv/${timeWindow}`);
     },
   },
 
@@ -92,15 +93,15 @@ export const tmdb = {
   },
 
   searchMovie(query: string) {
-    return tmdbFetch(
-      `/search/movie?query=${encodeURIComponent(query)}`
-    );
+    return tmdbFetch(`/search?query=${encodeURIComponent(query)}`);
   },
 
   searchTV(query: string) {
-    return tmdbFetch(
-      `/search/tv?query=${encodeURIComponent(query)}`
-    );
+    return tmdbFetch(`/search?query=${encodeURIComponent(query)}`);
+  },
+
+  search(query: string) {
+    return tmdbFetch(`/search?query=${encodeURIComponent(query)}`);
   },
 
   genres: {

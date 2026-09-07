@@ -23,9 +23,9 @@ export function GenreChips({
   active: string
   onChange: (genre: string) => void
 }) {
-  const all = ['All', ...genres]
+  const all = Array.from(new Set(['All', ...genres.filter((genre) => genre !== 'All')]))
   return (
-    <div className="no-scrollbar flex items-center gap-2 overflow-x-auto pb-1">
+    <div className="flex items-center gap-2 overflow-x-auto pb-1">
       {all.map((g) => {
         const isActive = g === active
         return (
@@ -34,16 +34,11 @@ export function GenreChips({
             onClick={() => onChange(g)}
             className={cn(
               'relative shrink-0 rounded-full px-4 py-2 text-sm font-medium transition-colors',
-              isActive ? 'text-background' : 'text-muted-foreground hover:text-foreground',
+              isActive
+                ? 'bg-foreground text-background shadow-sm shadow-black/20'
+                : 'text-muted-foreground hover:text-foreground',
             )}
           >
-            {isActive && (
-              <motion.span
-                layoutId="genre-pill"
-                className="absolute inset-0 -z-10 rounded-full bg-foreground"
-                transition={{ type: 'spring', stiffness: 400, damping: 32 }}
-              />
-            )}
             {g}
           </button>
         )

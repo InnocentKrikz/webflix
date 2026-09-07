@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getTitles } from '@/lib/data'
 import type { MediaType } from '@/lib/types'
 
-export const dynamic = 'force-dynamic'
+export const revalidate = 60
 
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams

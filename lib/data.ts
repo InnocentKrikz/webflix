@@ -1,6 +1,7 @@
 import "server-only";
 
 import { tmdb } from "./tmdb";
+import { isTitleReleased, isSeasonReleased } from "./availability";
 import type {
   CastMember,
   Episode,
@@ -15,6 +16,7 @@ import type {
 } from "./types";
 
 const POSTER_SIZE = "w500";
+const LOGO_SIZE = "w500";
 const BACKDROP_SIZE = "w1280";
 const PROFILE_SIZE = "w185";
 const STILL_SIZE = "w300";
@@ -23,10 +25,9 @@ const IMAGE_BASE_URL = "https://image.tmdb.org/t/p";
 const MAX_GRID_TITLES = 42;
 const MAX_ROW_TITLES = 14;
 const MAX_FEATURED_TITLES = 5;
+const MAX_SHOWCASE_TITLES = 5;
 const MAX_CAST = 12;
 const MAX_TRAILERS = 6;
-const MAX_SEASONS = 3;
-const MAX_EPISODES = 10;
 const RECENT_BADGE_WINDOW_DAYS = 30;
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
@@ -80,6 +81,19 @@ type ApiVideo = {
   publishedAt?: string | null;
   published_at?: string | null;
 };
+
+type ApiImage = {
+  filePath?: string | null;
+  file_path?: string | null;
+  imageType?: string | null;
+  image_type?: string | null;
+};
+
+type ApiKeyword = {
+  name?: string;
+};
+
+type ApiImages = ApiImage[] | { logos?: ApiImage[] };
 
 type ApiContentRating = {
   countryCode?: string;
@@ -151,6 +165,8 @@ type ApiMovie = {
   release_dates?: { results?: ApiContentRating[] };
   credits?: { cast?: ApiCast[]; crew?: { name?: string; job?: string }[] };
   spoken_languages?: { english_name?: string; name?: string }[];
+  images?: ApiImages;
+  keywords?: ApiKeyword[];
 };
 
 type ApiTvShow = {
@@ -193,6 +209,8 @@ type ApiTvShow = {
   created_by?: { name?: string }[];
   seasons?: ApiSeason[];
   spoken_languages?: { english_name?: string; name?: string }[];
+  images?: ApiImages;
+  keywords?: ApiKeyword[];
 };
 
 type ApiMediaListItem = {
@@ -237,6 +255,18 @@ function imageUrl(path: string | null | undefined, size: string): string {
   if (!path) return "";
   if (path.startsWith("http")) return path;
   return `${IMAGE_BASE_URL}/${size}${path}`;
+}
+
+function logoUrl(images: ApiImages | undefined): string {
+  const logos = Array.isArray(images)
+    ? images.filter((image) => {
+        const imageType = image.imageType ?? image.image_type;
+        return imageType?.toUpperCase() === "LOGO";
+      })
+    : images?.logos ?? [];
+
+  const logo = logos.find((image) => image.filePath ?? image.file_path);
+  return imageUrl(logo?.filePath ?? logo?.file_path, LOGO_SIZE);
 }
 
 function yearFrom(value: string | null | undefined): number {
@@ -335,6 +365,16 @@ function videoList(videos: ApiMovie["videos"] | ApiTvShow["videos"]): ApiVideo[]
 function mapTrailers(videos: ApiMovie["videos"] | ApiTvShow["videos"]): Trailer[] {
   return videoList(videos)
     .filter((video) => video.key && video.site === "YouTube")
+    .sort((a, b) => {
+      const priority = (video: ApiVideo) => {
+        const type = video.videoType ?? video.type;
+        if (type === "Trailer") return 0;
+        if (type === "Teaser") return 1;
+        if (type === "Clip") return 2;
+        return 3;
+      };
+      return priority(a) - priority(b);
+    })
     .slice(0, MAX_TRAILERS)
     .map((video, index) => {
       const type = video.videoType ?? video.type ?? "Clip";
@@ -343,6 +383,7 @@ function mapTrailers(videos: ApiMovie["videos"] | ApiTvShow["videos"]): Trailer[
 
       return {
         id: String(video.id ?? key ?? index),
+        videoKey: key,
         title: video.name ?? kind,
         kind,
         thumbnail: key ? `https://img.youtube.com/vi/${key}/hqdefault.jpg` : "",
@@ -353,7 +394,6 @@ function mapTrailers(videos: ApiMovie["videos"] | ApiTvShow["videos"]): Trailer[
 function mapEpisodes(episodes: ApiEpisode[] = [], seasonPoster = ""): Episode[] {
   return [...episodes]
     .sort((a, b) => (a.episodeNumber ?? a.episode_number ?? 0) - (b.episodeNumber ?? b.episode_number ?? 0))
-    .slice(0, MAX_EPISODES)
     .map((episode, index) => ({
       id: String(episode.id ?? episode.tmdbId ?? index),
       number: episode.episodeNumber ?? episode.episode_number ?? index + 1,
@@ -361,6 +401,7 @@ function mapEpisodes(episodes: ApiEpisode[] = [], seasonPoster = ""): Episode[] 
       description: episode.overview || "Episode details are coming soon.",
       duration: formatRuntime(episode.runtime),
       still: imageUrl(episode.stillPath ?? episode.still_path, STILL_SIZE) || seasonPoster,
+      releaseDate: episode.airDate ?? episode.air_date ?? undefined,
     }));
 }
 
@@ -368,7 +409,6 @@ function mapSeasons(seasons: ApiSeason[] = [], maturity: Maturity, fallbackPoste
   return seasons
     .filter((season) => (season.seasonNumber ?? season.season_number ?? 0) > 0)
     .sort((a, b) => (a.seasonNumber ?? a.season_number ?? 0) - (b.seasonNumber ?? b.season_number ?? 0))
-    .slice(0, MAX_SEASONS)
     .map((season, index) => {
       const number = season.seasonNumber ?? season.season_number ?? index + 1;
       const poster = imageUrl(season.posterPath ?? season.poster_path, POSTER_SIZE) || fallbackPoster;
@@ -380,20 +420,11 @@ function mapSeasons(seasons: ApiSeason[] = [], maturity: Maturity, fallbackPoste
         name: season.name ?? `Season ${number}`,
         maturity,
         contentTags: episodeCount ? [`${episodeCount} Episodes`] : ["Episodes"],
-        episodes: episodes.length > 0 ? episodes : createPlaceholderEpisodes(episodeCount || 6, poster),
+        releaseDate: season.airDate ?? season.air_date ?? undefined,
+        episodesLoaded: episodes.length > 0,
+        episodes,
       };
     });
-}
-
-function createPlaceholderEpisodes(count: number, still: string): Episode[] {
-  return Array.from({ length: Math.min(count, MAX_EPISODES) }, (_, index) => ({
-    id: `episode-${index + 1}`,
-    number: index + 1,
-    title: `Episode ${index + 1}`,
-    description: "Episode details are coming soon.",
-    duration: "45m",
-    still,
-  }));
 }
 
 function qualityFrom(title: { voteAverage?: number | null; vote_average?: number | null; popularity?: number | null }): Quality {
@@ -416,6 +447,16 @@ function keywordsFrom(genres: string[], type: MediaType, status?: string | null)
   return Array.from(new Set(words)).slice(0, 4);
 }
 
+function mapKeywords(keywords: ApiKeyword[] | undefined): string[] {
+  return (keywords ?? [])
+    .map((keyword) => keyword.name)
+    .filter((name): name is string => Boolean(name));
+}
+
+function hasDetailedMediaData(media: ApiMedia): boolean {
+  return "cast" in media || "credits" in media || "videos" in media || "images" in media || "seasons" in media;
+}
+
 function addBadge(badges: TitleBadge[], badge: TitleBadge) {
   if (!badges.includes(badge)) badges.push(badge);
 }
@@ -433,6 +474,11 @@ function withBadge(title: Title, badge: TitleBadge): Title {
 
 function applyTopTenBadges(titles: Title[], topTenIds: Set<string>): Title[] {
   return titles.map((title) => (topTenIds.has(title.id) ? withBadge(title, "Top 10") : title));
+}
+
+async function topTenIds(): Promise<Set<string>> {
+  const featured = mapList(await readList(tmdb.featured.all()));
+  return new Set(uniqueTitles([featured]).slice(0, 10).map((title) => title.id));
 }
 
 function badgesForMovie(releaseDate: string | null | undefined): TitleBadge[] {
@@ -497,12 +543,14 @@ function mapMovie(movie: ApiMovie, catalog: Title[] = []): Title | null {
   const releaseDate = movie.releaseDate ?? movie.release_date;
   const maturity = maturityFromRating(movieRating(movie), "movie");
   const badges = badgesForMovie(releaseDate);
+  const keywords = mapKeywords(movie.keywords);
   const mapped: Title = {
     id: `movie-${tmdbId}`,
     slug: slugify(title, "movie", tmdbId),
     title,
     type: "movie",
     year: yearFrom(releaseDate),
+    releaseDate: releaseDate ?? undefined,
     rating: Number((movie.voteAverage ?? movie.vote_average ?? 0).toFixed(1)),
     maturity,
     quality: qualityFrom(movie),
@@ -512,18 +560,21 @@ function mapMovie(movie: ApiMovie, catalog: Title[] = []): Title | null {
     tagline: movie.tagline || "",
     description: movie.overview || "No description available yet.",
     poster: imageUrl(movie.posterPath ?? movie.poster_path, POSTER_SIZE),
+    logo: logoUrl(movie.images),
     backdrop: imageUrl(movie.backdropPath ?? movie.backdrop_path, BACKDROP_SIZE),
     creator: creatorFromMovie(movie),
-    status: movie.status ?? "Released",
-    keywords: keywordsFrom(genres, "movie", movie.status),
+    status: movie.status ?? "",
+    keywords: keywords.length > 0 ? keywords : keywordsFrom(genres, "movie", movie.status),
     cast: mapCast(movie.cast ?? movie.credits?.cast),
     similar: [],
     trailers: mapTrailers(movie.videos),
     badges,
     badge: badges[0],
+    detailsLoaded: hasDetailedMediaData(movie),
   };
 
   mapped.similar = similarIds(mapped, catalog);
+  mapped.upcoming = !isTitleReleased(mapped);
   return mapped;
 }
 
@@ -537,12 +588,14 @@ function mapTvShow(tv: ApiTvShow, catalog: Title[] = []): Title | null {
   const maturity = maturityFromRating(tvRating(tv), "tv");
   const runtime = tv.runtime ?? tv.episode_run_time?.[0];
   const badges = badgesForTv(releaseDate, tv.seasons);
+  const keywords = mapKeywords(tv.keywords);
   const mapped: Title = {
     id: `tv-${tmdbId}`,
     slug: slugify(title, "tv", tmdbId),
     title,
     type: "tv",
     year: yearFrom(releaseDate),
+    releaseDate: releaseDate ?? undefined,
     rating: Number((tv.voteAverage ?? tv.vote_average ?? 0).toFixed(1)),
     maturity,
     quality: qualityFrom(tv),
@@ -552,19 +605,22 @@ function mapTvShow(tv: ApiTvShow, catalog: Title[] = []): Title | null {
     tagline: tv.tagline || "",
     description: tv.overview || "No description available yet.",
     poster: imageUrl(tv.posterPath ?? tv.poster_path, POSTER_SIZE),
+    logo: logoUrl(tv.images),
     backdrop: imageUrl(tv.backdropPath ?? tv.backdrop_path, BACKDROP_SIZE),
     creator: creatorFromTv(tv),
-    status: tv.status ?? "Returning Series",
-    keywords: keywordsFrom(genres, "tv", tv.status),
+    status: tv.status ?? "",
+    keywords: keywords.length > 0 ? keywords : keywordsFrom(genres, "tv", tv.status),
     cast: mapCast(tv.cast ?? tv.credits?.cast),
     seasons: mapSeasons(tv.seasons, maturity, imageUrl(tv.backdropPath ?? tv.backdrop_path, BACKDROP_SIZE)),
     similar: [],
     trailers: mapTrailers(tv.videos),
     badges,
     badge: badges[0],
+    detailsLoaded: hasDetailedMediaData(tv),
   };
 
   mapped.similar = similarIds(mapped, catalog);
+  mapped.upcoming = !isTitleReleased(mapped);
   return mapped;
 }
 
@@ -579,6 +635,10 @@ function mapListItem(item: ApiMediaListItem, catalog: Title[] = []): Title | nul
 
   if (item.movie) return mapMovie(item.movie, catalog);
   if (item.tvShow) return mapTvShow(item.tvShow, catalog);
+
+  // Unsynced TMDB lists contain raw media instead of database relation wrappers.
+  if ('title' in item) return mapMovie(item as ApiMovie, catalog);
+  if ('name' in item && !('known_for_department' in item)) return mapTvShow(item as ApiTvShow, catalog);
 
   return null;
 }
@@ -614,6 +674,7 @@ async function catalog(): Promise<Title[]> {
     readList(tmdb.movies.topRated() as Promise<unknown>),
     readList(tmdb.tv.topRated() as Promise<unknown>),
     readList(tmdb.movies.upcoming() as Promise<unknown>),
+    readList(tmdb.tv.upcoming() as Promise<unknown>),
     readList(tmdb.tv.nowPlaying() as Promise<unknown>),
   ]);
 
@@ -706,6 +767,10 @@ export async function getHomeData(): Promise<{ featuredTitles: Title[]; rows: Ro
     popularTvItems,
     topMovieItems,
     topTvItems,
+    movieNowPlayingItems,
+    tvNowPlayingItems,
+    movieUpcomingItems,
+    tvUpcomingItems,
   ] = await Promise.all([
     readList(tmdb.featured.all() as Promise<unknown>),
     readList(tmdb.movies.trending() as Promise<unknown>),
@@ -714,6 +779,10 @@ export async function getHomeData(): Promise<{ featuredTitles: Title[]; rows: Ro
     readList(tmdb.tv.popular() as Promise<unknown>),
     readList(tmdb.movies.topRated() as Promise<unknown>),
     readList(tmdb.tv.topRated() as Promise<unknown>),
+    readList(tmdb.movies.nowPlaying() as Promise<unknown>),
+    readList(tmdb.tv.nowPlaying() as Promise<unknown>),
+    readList(tmdb.movies.upcoming() as Promise<unknown>),
+    readList(tmdb.tv.upcoming() as Promise<unknown>),
   ]);
 
   const featured = mapList(featuredItems);
@@ -723,9 +792,18 @@ export async function getHomeData(): Promise<{ featuredTitles: Title[]; rows: Ro
   const popularTv = mapList(popularTvItems);
   const topMovies = mapList(topMovieItems);
   const topTv = mapList(topTvItems);
+  const nowPlayingMovies = mapList(movieNowPlayingItems);
+  const nowPlayingTv = mapList(tvNowPlayingItems);
+  const upcomingMovies = mapList(movieUpcomingItems);
+  const upcomingTv = mapList(tvUpcomingItems);
+  const upcomingTitles = uniqueTitles([upcomingMovies, upcomingTv]);
 
-  const titles = uniqueTitles([featured, movieTrending, tvTrending, popularMovies, popularTv, topMovies, topTv]);
-  const withSimilar = titles.map((title) => ({ ...title, similar: similarIds(title, titles) }));
+  const titles = uniqueTitles([featured, movieTrending, tvTrending, popularMovies, popularTv, topMovies, topTv, nowPlayingMovies, nowPlayingTv, upcomingTitles]);
+  const withSimilar: Title[] = titles.map((title) => ({
+    ...title,
+    upcoming: !isTitleReleased(title),
+    similar: similarIds(title, titles),
+  }));
   const byId = new Map(withSimilar.map((title) => [title.id, title]));
   const hydrate = (items: Title[]) => items.map((title) => byId.get(title.id)).filter((title): title is Title => Boolean(title));
 
@@ -735,6 +813,14 @@ export async function getHomeData(): Promise<{ featuredTitles: Title[]; rows: Ro
 
   const trendingMovies = badgeTopTen(hydrate(movieTrending).slice(0, MAX_ROW_TITLES));
   const trendingTv = badgeTopTen(hydrate(tvTrending).slice(0, MAX_ROW_TITLES));
+  const topRatedMovies = badgeTopTen(hydrate(topMovies).slice(0, MAX_ROW_TITLES));
+  const topRatedTv = badgeTopTen(hydrate(topTv).slice(0, MAX_ROW_TITLES));
+  const nowPlayingMovieTitles = badgeTopTen(hydrate(nowPlayingMovies).slice(0, MAX_ROW_TITLES));
+  const nowPlayingTvTitles = badgeTopTen(hydrate(nowPlayingTv).slice(0, MAX_ROW_TITLES));
+  const showcaseTitles = upcomingTitles
+    .map((title) => byId.get(title.id))
+    .filter((title): title is Title => Boolean(title?.trailers.length))
+    .slice(0, MAX_SHOWCASE_TITLES);
 
   const rows: Row[] = [
     {
@@ -742,6 +828,8 @@ export async function getHomeData(): Promise<{ featuredTitles: Title[]; rows: Ro
       title: "Trending Movies",
       kind: "landscape",
       titles: trendingMovies,
+      addLogo: true,
+      addText: true,
       filterable: true,
       variants: {
         movie: {
@@ -761,18 +849,58 @@ export async function getHomeData(): Promise<{ featuredTitles: Title[]; rows: Ro
       title: "Top 10 Today",
       kind: "top10",
       titles: top10Titles,
+      addLogo: false,
+      addText: false,
+    },
+    {
+      id: "trailers",
+      title: "Trailers",
+      kind: "showcase",
+      titles: showcaseTitles,
+      addLogo: true,
+      addText: false,
+    },
+    {
+      id: "top-rated",
+      title: "Top Rated Movies",
+      kind: "landscape",
+      titles: topRatedMovies,
+      addLogo: true,
+      addText: true,
+      filterable: true,
+      variants: {
+        movie: { title: "Top Rated Movies", kind: "landscape", titles: topRatedMovies },
+        tv: { title: "Top Rated TV Shows", kind: "landscape", titles: topRatedTv },
+      },
+    },
+    {
+      id: "now-playing",
+      title: "Now Playing Movies",
+      kind: "landscape",
+      titles: nowPlayingMovieTitles,
+      addLogo: true,
+      addText: true,
+      filterable: true,
+      variants: {
+        movie: { title: "Now Playing Movies", kind: "landscape", titles: nowPlayingMovieTitles },
+        tv: { title: "Now Playing TV Shows", kind: "landscape", titles: nowPlayingTvTitles },
+      },
     },
     {
       id: "popular-movies",
       title: "Popular Movies",
-      kind: "ranked",
+      kind: "landscape",
       titles: badgeTopTen(hydrate(popularMovies).slice(0, MAX_ROW_TITLES)),
+      addLogo: true,
+      addText: true,
     },
     {
       id: "popular-tv",
       title: "Popular Series",
       kind: "landscape",
       titles: badgeTopTen(hydrate(popularTv).slice(0, MAX_ROW_TITLES)),
+      addLogo: true,
+      addText: true,
     },
   ];
 
@@ -793,17 +921,27 @@ export async function getTitles(options: {
   sort?: SortOption;
   type?: BrowserType;
 } = {}): Promise<Title[]> {
+  const topTen = topTenIds();
   if (options.ids?.length) {
     const fullCatalog = await catalog();
     const titles = await Promise.all(options.ids.map((id) => titleFromId(id, fullCatalog)));
-    return applyFilters(titles.filter((title): title is Title => Boolean(title)), {
+    const filteredTitles = applyFilters(titles.filter((title): title is Title => Boolean(title)), {
       ...options,
       sort: undefined,
-    }).slice(0, MAX_GRID_TITLES);
+    });
+
+    return applyTopTenBadges(filteredTitles, await topTen).slice(0, MAX_GRID_TITLES);
   }
 
   if (options.query) {
-    return applyFilters(await catalog(), options).slice(0, MAX_GRID_TITLES);
+    const searchItems = await readList(tmdb.search(options.query) as Promise<unknown>);
+    const searchTitles = mapList(searchItems);
+    const withSimilar = searchTitles.map((title) => ({
+      ...title,
+      similar: similarIds(title, searchTitles),
+    }));
+
+    return applyTopTenBadges(applyFilters(withSimilar, options), await topTen).slice(0, MAX_GRID_TITLES);
   }
 
   const sort = options.sort ?? "trending";
@@ -811,11 +949,36 @@ export async function getTitles(options: {
   const titles = uniqueTitles(groups.map((group) => mapList(group)));
   const withSimilar = titles.map((title) => ({ ...title, similar: similarIds(title, titles) }));
 
-  return applyFilters(withSimilar, { ...options, sort }).slice(0, MAX_GRID_TITLES);
+  return applyTopTenBadges(applyFilters(withSimilar, { ...options, sort }), await topTen).slice(0, MAX_GRID_TITLES);
 }
 
 export async function getTitle(id: string): Promise<Title | undefined> {
-  return titleFromId(id, await catalog());
+  // Detail endpoints resolve database records before falling back to TMDB. Do
+  // this first so a modal/watch page is not blocked on rebuilding the catalog
+  // from multiple list endpoints.
+  const detail = await titleFromId(id, []);
+  if (detail) return detail;
+
+  const [titles, topTen] = await Promise.all([catalog(), topTenIds()]);
+  const title = titles.find((item) => item.id === id);
+  return title ? applyTopTenBadges([title], topTen)[0] : undefined;
+}
+
+export async function getWatchTitle(slug: string, seasonNumber?: number): Promise<Title | undefined> {
+  const title = await getBySlug(slug);
+  if (!title || title.type !== 'tv' || !isTitleReleased(title)) return title;
+  const season = seasonNumber !== undefined
+    ? title.seasons?.find((item) => item.number === seasonNumber)
+    : title.seasons?.find((item) => isSeasonReleased(item));
+  if (!season || season.episodesLoaded) return title;
+  try {
+    const raw = unwrapResults<ApiSeason>(await tmdb.tv.seasonDetails(Number(title.id.split('-')[1]), season.number));
+    const loaded = mapSeasons([{ ...raw, seasonNumber: season.number }], title.maturity, title.backdrop)[0];
+    if (loaded) return { ...title, seasons: title.seasons?.map((item) => item.number === season.number ? loaded : item) };
+  } catch {
+    // Keep unavailable episodes blocked when their release metadata cannot be loaded.
+  }
+  return title;
 }
 
 async function titleFromId(id: string, fullCatalog: Title[]): Promise<Title | undefined> {

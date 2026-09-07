@@ -1,8 +1,8 @@
 const COLUMNS = [
-  { title: 'Watch', links: ['Movies', 'TV Shows', 'Anime', 'Live TV', 'New & Popular'] },
-  { title: 'Company', links: ['About Webflix', 'Jobs', 'Press', 'Investors', 'Newsroom'] },
-  { title: 'Support', links: ['Help Center', 'Account', 'Devices', 'Redeem Gift Cards', 'Contact Us'] },
-  { title: 'Legal', links: ['Terms of Use', 'Privacy', 'Cookie Preferences', 'Corporate Info'] },
+  { title: 'Home', links: [{name:'Movies', link: "movies"},{name:'TV Shows', link: "tvshows"},{name:'Discord', link: "discord"},{name:'Telegram', link: "telegram"}] },
+  //{ title: 'Company', links: ['About Webflix', 'Jobs', 'Press', 'Investors', 'Newsroom'] },
+  //{ title: 'Support', links: ['Help Center', 'Account', 'Devices', 'Redeem Gift Cards', 'Contact Us'] },
+  //{ title: 'Legal', links: ['Terms of Use', 'Privacy', 'Cookie Preferences', 'Corporate Info'] },
 ]
 
 export function SiteFooter() {
@@ -14,10 +14,10 @@ export function SiteFooter() {
             <div key={col.title}>
               <h3 className="mb-3 font-display text-sm font-semibold text-foreground">{col.title}</h3>
               <ul className="space-y-2">
-                {col.links.map((link) => (
-                  <li key={link}>
+                {col.links.map((item) => (
+                  <li key={item.link}>
                     <a href="#" className="text-sm text-muted-foreground transition-colors hover:text-foreground">
-                      {link}
+                      {item.name}
                     </a>
                   </li>
                 ))}
@@ -30,7 +30,7 @@ export function SiteFooter() {
             WEB<span className="text-foreground">FLIX</span>
           </span>
           <p className="text-xs text-muted-foreground">
-            &copy; {new Date().getFullYear()} Webflix. A demo streaming experience. All artwork is AI-generated and fictional.
+             {new Date().getFullYear()} Webflix
           </p>
         </div>
       </div>

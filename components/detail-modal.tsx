@@ -3,7 +3,7 @@
 import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Select from '@radix-ui/react-select'
 import * as Switch from '@radix-ui/react-switch'
@@ -12,27 +12,36 @@ import {
   Check,
   ChevronDown,
   Lock,
+  LoaderCircle,
+  Pause,
   Play,
   Plus,
-  ThumbsUp,
   Volume2,
   VolumeX,
   X,
 } from 'lucide-react'
 import { useCatalog, useModal, useMyList } from '@/components/providers'
 import { LandscapeCard } from '@/components/media-card'
+import { MatchScore } from '@/components/match-score'
+import { RatingButton } from '@/components/rating-button'
+import { YouTubeTrailer, type YouTubeTrailerHandle } from '@/components/youtube-trailer'
 import { cn } from '@/lib/utils'
+import { isEpisodeReleased, isSeasonReleased, isTitleReleased } from '@/lib/availability'
 import type { Title } from '@/lib/types'
 
 function EpisodeRow({
   episode,
   spoilerProtected,
+  available,
+  onPlay,
 }: {
   episode: NonNullable<Title['seasons']>[number]['episodes'][number]
   spoilerProtected: boolean
+  available: boolean
+  onPlay: () => void
 }) {
   const [revealed, setRevealed] = useState(false)
-  const hidden = spoilerProtected && !revealed
+  const hidden = available && spoilerProtected && !revealed
 
   return (
     <motion.li
@@ -52,8 +61,10 @@ function EpisodeRow({
           sizes="160px"
           className={cn('object-cover transition-all duration-300', hidden && 'blur-md scale-105')}
         />
-        {!hidden && (
+        {!hidden && available && (
           <button
+            type="button"
+            onClick={onPlay}
             aria-label={`Play ${episode.title}`}
             className="absolute inset-0 grid place-items-center bg-black/0 opacity-0 transition-opacity hover:bg-black/40 hover:opacity-100"
           >
@@ -75,7 +86,9 @@ function EpisodeRow({
           <p className={cn('truncate text-sm font-semibold', hidden && 'select-none blur-sm')}>
             {hidden ? 'Hidden episode title' : episode.title}
           </p>
-          <span className="shrink-0 text-xs text-muted-foreground">{episode.duration}</span>
+          <span className={cn('shrink-0 text-xs', available ? 'text-muted-foreground' : 'font-semibold text-primary')}>
+            {available ? episode.duration : 'Coming Soon'}
+          </span>
         </div>
         <p className={cn('mt-1 line-clamp-2 text-xs text-muted-foreground', hidden && 'select-none blur-sm')}>
           {hidden ? 'Spoiler protection is on. Reveal the thumbnail to see details for this episode.' : episode.description}
@@ -94,45 +107,82 @@ export function DetailModal() {
   const [spoilerProtected, setSpoilerProtected] = useState(true)
   const [seasonIdx, setSeasonIdx] = useState(0)
   const [loadingId, setLoadingId] = useState<string | null>(null)
-  const [requestedDetails, setRequestedDetails] = useState<string[]>([])
+  const [detailTitle, setDetailTitle] = useState<Title | null>(null)
+  const [trailerLoaded, setTrailerLoaded] = useState(false)
+  const [trailerPlaying, setTrailerPlaying] = useState(false)
+  const [trailerHovered, setTrailerHovered] = useState(false)
+  const trailerPlayerRef = useRef<YouTubeTrailerHandle>(null)
+  const requestedDetails = useRef(new Set<string>())
 
-  const title = openId ? getTitle(openId) : undefined
+  const catalogTitle = openId ? getTitle(openId) : undefined
+  const title = openId && detailTitle?.id === openId ? detailTitle : catalogTitle
+  const isUpcoming = title ? !isTitleReleased(title) : false
+  const detailsLoading = loadingId === openId
 
   useEffect(() => {
-    if (!openId || loadingId === openId) return
-    if (requestedDetails.includes(openId)) return
-    if (title && title.cast.length > 0 && title.trailers.length > 0) return
+    if (!openId || requestedDetails.current.has(openId) || catalogTitle?.detailsLoaded) return
 
+    const detailId = openId
+    requestedDetails.current.add(detailId)
     const controller = new AbortController()
-    setLoadingId(openId)
+    setLoadingId(detailId)
 
-    fetch(`/api/titles/${openId}`, { signal: controller.signal })
+    fetch(`/api/titles/${detailId}`, { signal: controller.signal })
       .then((response) => (response.ok ? response.json() : undefined))
       .then((detail: Title | undefined) => {
-        if (detail) registerTitles([detail])
+        if (detail) {
+          setDetailTitle(detail)
+          registerTitles([detail])
+        } else {
+          requestedDetails.current.delete(detailId)
+        }
       })
-      .catch(() => {})
+      .catch(() => {
+        requestedDetails.current.delete(detailId)
+      })
       .finally(() => {
-        setRequestedDetails((ids) => (ids.includes(openId) ? ids : [...ids, openId]))
-        setLoadingId(null)
+        setLoadingId((current) => (current === detailId ? null : current))
       })
 
     return () => controller.abort()
-  }, [loadingId, openId, registerTitles, requestedDetails, title])
+  }, [catalogTitle?.detailsLoaded, openId, registerTitles])
 
   const similar = useMemo(() => {
     if (!title) return []
     return title.similar.map(getTitle).filter((t): t is Title => Boolean(t)).slice(0, 6)
   }, [title])
 
+  const trailers = useMemo(
+    () => [...(title?.trailers ?? [])].sort((a, b) => Number(b.kind === 'Trailer') - Number(a.kind === 'Trailer')),
+    [title?.trailers],
+  )
+  const trailer = trailers.find((item) => item.videoKey) ?? trailers[0]
+
+  useEffect(() => {
+    if (!openId) return
+    setTrailerLoaded(false)
+    setTrailerPlaying(Boolean(trailer?.videoKey))
+    setTrailerHovered(false)
+  }, [openId, trailer?.videoKey])
+
   const season = title?.seasons?.[seasonIdx] ?? title?.seasons?.[0]
 
   function onOpenChange(open: boolean) {
     if (!open) {
       close()
+      setDetailTitle(null)
       setSeasonIdx(0)
       setMuted(true)
+      setTrailerLoaded(false)
+      setTrailerPlaying(false)
+      setTrailerHovered(false)
     }
+  }
+
+  function onTrailerEnded() {
+    setTrailerPlaying(false)
+    setTrailerLoaded(false)
+    setTrailerHovered(false)
   }
 
   return (
@@ -153,6 +203,9 @@ export function DetailModal() {
             <Dialog.Content asChild forceMount aria-describedby={undefined}>
               <motion.div
                 className="fixed inset-0 z-[90] overflow-y-auto py-6 md:py-12"
+                onPointerDown={(event) => {
+                  if (event.target === event.currentTarget) onOpenChange(false)
+                }}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
@@ -168,15 +221,32 @@ export function DetailModal() {
                   <Dialog.Title className="sr-only">{title.title}</Dialog.Title>
 
                   {/* Hero */}
-                  <div className="relative aspect-video w-full">
+                  <div
+                    className="relative aspect-video w-full"
+                    onMouseEnter={() => setTrailerHovered(true)}
+                    onMouseLeave={() => setTrailerHovered(false)}
+                  >
                     <Image
                       src={title.backdrop || '/placeholder.svg'}
                       alt={title.title}
                       fill
                       sizes="100vw"
-                      className="object-cover"
+                      className={cn('object-cover transition-opacity duration-300', trailerLoaded && 'opacity-0')}
                       priority
                     />
+                    {trailer?.videoKey && (
+                      <YouTubeTrailer
+                        key={`${title.id}-${trailer.videoKey}`}
+                        ref={trailerPlayerRef}
+                        videoKey={trailer.videoKey}
+                        playing={trailerPlaying}
+                        muted={muted}
+                        onEnded={onTrailerEnded}
+                        onPlaybackChange={setTrailerPlaying}
+                        onMuteChange={setMuted}
+                        onReadyChange={setTrailerLoaded}
+                      />
+                    )}
                     <div className="absolute inset-0 bg-gradient-to-t from-card via-card/30 to-black/10" />
                     <div className="absolute inset-0 bg-gradient-to-r from-black/50 via-transparent to-transparent" />
 
@@ -187,26 +257,70 @@ export function DetailModal() {
                       <X className="size-5" />
                     </Dialog.Close>
 
-                    <button
-                      onClick={() => setMuted((m) => !m)}
-                      aria-label={muted ? 'Unmute' : 'Mute'}
-                      className="absolute bottom-4 right-4 z-10 grid size-9 place-items-center rounded-full border border-white/40 bg-black/40 text-foreground backdrop-blur"
-                    >
-                      {muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
-                    </button>
+                    {trailer?.videoKey && (
+                      <div className="absolute bottom-4 right-4 z-10 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTrailerLoaded(true)
+                            trailerPlayerRef.current?.togglePlayback()
+                          }}
+                          aria-label={trailerPlaying ? 'Pause trailer' : 'Play trailer'}
+                          className="grid size-9 place-items-center rounded-full border border-white/40 bg-black/40 text-foreground backdrop-blur transition-all hover:border-white/70"
+                        >
+                          {trailerPlaying ? <Pause className="size-4 fill-current" /> : <Play className="size-4 fill-current" />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => trailerPlayerRef.current?.toggleMute()}
+                          aria-label={muted ? 'Unmute trailer' : 'Mute trailer'}
+                          className="grid size-9 place-items-center rounded-full border border-white/40 bg-black/40 text-foreground backdrop-blur transition-colors hover:border-white/70"
+                        >
+                          {muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
+                        </button>
+                      </div>
+                    )}
 
                     <div className="absolute inset-x-0 bottom-0 flex flex-col gap-4 p-5 sm:p-8">
-                      <h2 className="font-display max-w-[80%] text-balance text-3xl font-extrabold leading-none tracking-tight sm:text-4xl">
-                        {title.title}
-                      </h2>
-                      <div className="flex flex-wrap items-center gap-3">
-                        <button
-                          onClick={() => router.push(`/watch/${title.slug}`)}
-                          className="inline-flex items-center gap-2 rounded-full bg-foreground px-6 py-2.5 text-sm font-semibold text-background transition-transform hover:scale-[1.03] active:scale-95 sm:px-7 sm:py-3 sm:text-base"
-                        >
-                          <Play className="size-4 fill-background sm:size-5" />
-                          Play
-                        </button>
+                      {title.logo ? (
+                        <div className="relative h-12 w-[min(75%,20rem)] sm:h-16 sm:w-[min(70%,24rem)]">
+                          <Image
+                            src={title.logo}
+                            alt={title.title}
+                            fill
+                            sizes="(max-width: 640px) 75vw, 24rem"
+                            className="object-contain object-left"
+                          />
+                        </div>
+                      ) : (
+                        <h2 className="font-display max-w-[80%] text-balance text-3xl font-extrabold leading-none tracking-tight sm:text-4xl">
+                          {title.title}
+                        </h2>
+                      )}
+                      <motion.div
+                        initial={false}
+                        animate={trailerPlaying && !trailerHovered ? { height: 0, opacity: 0 } : { height: 'auto', opacity: 1 }}
+                        transition={{ duration: 0.25, ease: 'easeInOut' }}
+                        aria-hidden={trailerPlaying && !trailerHovered}
+                        className="flex flex-wrap items-center gap-3 overflow-hidden"
+                        style={{ pointerEvents: trailerPlaying && !trailerHovered ? 'none' : 'auto' }}
+                      >
+                        {isUpcoming ? (
+                          <span className="inline-flex items-center rounded-full bg-white/15 px-6 py-2.5 text-sm font-semibold text-foreground backdrop-blur sm:px-7 sm:py-3 sm:text-base">
+                            Coming Soon
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              onOpenChange(false)
+                              router.push(`/watch/${title.slug}`)
+                            }}
+                            className="inline-flex items-center gap-2 rounded-full bg-foreground px-6 py-2.5 text-sm font-semibold text-background transition-transform hover:scale-[1.03] active:scale-95 sm:px-7 sm:py-3 sm:text-base"
+                          >
+                            <Play className="size-4 fill-background sm:size-5" />
+                            Play
+                          </button>
+                        )}
                         <button
                           onClick={() => toggle(title.id)}
                           aria-label={has(title.id) ? 'Remove from My List' : 'Add to My List'}
@@ -214,13 +328,12 @@ export function DetailModal() {
                         >
                           {has(title.id) ? <Check className="size-4 text-primary sm:size-5" /> : <Plus className="size-4 sm:size-5" />}
                         </button>
-                        <button
-                          aria-label="Rate this title"
-                          className="grid size-10 place-items-center rounded-full border border-white/40 bg-black/30 text-foreground backdrop-blur transition-colors hover:border-white sm:size-11"
-                        >
-                          <ThumbsUp className="size-4 sm:size-5" />
-                        </button>
-                      </div>
+                        {!isUpcoming && (
+                          <div>
+                            <RatingButton id={title.id} large />
+                          </div>
+                        )}
+                      </motion.div>
                     </div>
                   </div>
 
@@ -228,7 +341,7 @@ export function DetailModal() {
                   <div className="grid gap-6 p-5 sm:p-8 md:grid-cols-[2fr_1fr]">
                     <div className="min-w-0 space-y-4">
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-                        <span className="font-semibold text-emerald-400">{Math.round(title.rating * 10)}% Match</span>
+                        <MatchScore id={title.id} />
                         <span className="text-muted-foreground">{title.year}</span>
                         <span className="rounded border border-white/25 px-1.5 py-0.5 text-xs font-semibold">{title.maturity}</span>
                         <span className="text-muted-foreground">
@@ -247,15 +360,21 @@ export function DetailModal() {
                     <div className="space-y-3 text-sm">
                       <p>
                         <span className="text-muted-foreground">Cast: </span>
-                        <span className="text-foreground/90">{title.cast.map((c) => c.name).join(', ')}</span>
+                        <span className="text-foreground/90">
+                          {detailsLoading ? 'Loading details…' : title.cast.map((c) => c.name).join(', ')}
+                        </span>
                       </p>
                       <p>
                         <span className="text-muted-foreground">Genres: </span>
-                        <span className="text-foreground/90">{title.genres.join(', ')}</span>
+                        <span className="text-foreground/90">
+                          {detailsLoading ? 'Loading details…' : title.genres.join(', ')}
+                        </span>
                       </p>
                       <p>
                         <span className="text-muted-foreground">This {title.type === 'tv' ? 'show' : 'movie'} is: </span>
-                        <span className="text-foreground/90">{title.keywords.join(', ')}</span>
+                        <span className="text-foreground/90">
+                          {detailsLoading ? 'Loading details…' : title.keywords.join(', ')}
+                        </span>
                       </p>
                     </div>
                   </div>
@@ -263,19 +382,28 @@ export function DetailModal() {
                   {/* Cast avatars */}
                   <div className="border-t border-white/5 px-5 py-6 sm:px-8">
                     <h3 className="mb-4 font-heading text-sm font-bold uppercase tracking-wide text-muted-foreground">Cast</h3>
-                    <div className="no-scrollbar flex gap-5 overflow-x-auto pb-1">
-                      {title.cast.map((member) => (
-                        <div key={member.character} className="flex w-20 shrink-0 flex-col items-center gap-2 text-center">
-                          <div className="relative size-16 overflow-hidden rounded-full ring-1 ring-white/10">
-                            <Image src={member.photo || '/placeholder.svg'} alt={member.name} fill sizes="64px" className="object-cover" />
+                    {detailsLoading ? (
+                      <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+                        <LoaderCircle className="size-4 animate-spin text-primary" />
+                        Loading cast details…
+                      </div>
+                    ) : title.cast.length > 0 ? (
+                      <div className="flex max-w-full snap-x snap-mandatory gap-5 overflow-x-auto overscroll-x-contain pb-3 pr-2 touch-pan-x">
+                        {title.cast.map((member, index) => (
+                          <div key={`${member.name}-${member.character}-${index}`} className="flex w-24 shrink-0 snap-start flex-col items-center gap-2 text-center">
+                            <div className="relative size-16 overflow-hidden rounded-full ring-1 ring-white/10">
+                              <Image src={member.photo || '/placeholder.svg'} alt={member.name} fill sizes="64px" className="object-cover" />
+                            </div>
+                            <div className="leading-tight">
+                              <p className="break-words text-xs font-semibold">{member.name}</p>
+                              <p className="break-words text-[11px] text-muted-foreground">{member.character}</p>
+                            </div>
                           </div>
-                          <div className="leading-tight">
-                            <p className="line-clamp-1 text-xs font-semibold">{member.name}</p>
-                            <p className="line-clamp-1 text-[11px] text-muted-foreground">{member.character}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No cast information available.</p>
+                    )}
                   </div>
 
                   {/* Episodes */}
@@ -303,7 +431,7 @@ export function DetailModal() {
                                     className="cursor-pointer rounded px-3 py-2 text-sm outline-none data-[highlighted]:bg-white/10 data-[state=checked]:text-primary"
                                   >
                                     <Select.ItemText>
-                                      {s.name} ({s.episodes.length} Episodes)
+                                      {s.name}{isSeasonReleased(s) ? ` (${s.episodes.length} Episodes)` : ' · Coming Soon'}
                                     </Select.ItemText>
                                   </Select.Item>
                                 ))}
@@ -336,18 +464,37 @@ export function DetailModal() {
                       <ul>
                         <AnimatePresence mode="wait">
                           {season.episodes.map((ep) => (
-                            <EpisodeRow key={ep.id} episode={ep} spoilerProtected={spoilerProtected} />
+                            <EpisodeRow
+                              key={ep.id}
+                              episode={ep}
+                              spoilerProtected={spoilerProtected}
+                              available={isEpisodeReleased(title, season, ep)}
+                              onPlay={() => {
+                                if (!isEpisodeReleased(title, season, ep)) return
+                                onOpenChange(false)
+                                router.push(`/watch/${title.slug}?s=${season.number}&e=${ep.number}`)
+                              }}
+                            />
                           ))}
                         </AnimatePresence>
                       </ul>
+                      {season.episodes.length === 0 && (
+                        <p className="py-4 text-sm text-muted-foreground">Episodes are coming soon.</p>
+                      )}
                     </div>
                   )}
 
                   {/* Trailers & more */}
                   <div className="border-t border-white/5 px-5 py-6 sm:px-8">
                     <h3 className="mb-4 font-heading text-lg font-bold">Trailers &amp; More</h3>
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                      {title.trailers.map((t) => (
+                    {detailsLoading ? (
+                      <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+                        <LoaderCircle className="size-4 animate-spin text-primary" />
+                        Loading trailers…
+                      </div>
+                    ) : trailers.length > 0 ? (
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                        {trailers.map((t) => (
                         <button
                           key={t.id}
                           className="group relative aspect-video overflow-hidden rounded-md ring-1 ring-white/10"
@@ -371,8 +518,11 @@ export function DetailModal() {
                             {t.title}
                           </span>
                         </button>
-                      ))}
-                    </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No trailers available.</p>
+                    )}
 
                     <h3 className="mb-4 mt-8 font-heading text-lg font-bold">About {title.title}</h3>
                     <div className="grid gap-3 text-sm sm:grid-cols-2">
