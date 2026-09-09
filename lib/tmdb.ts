@@ -116,4 +116,16 @@ export const tmdb = {
       return tmdbFetch(`/genre/tv/list`);
     },
   },
+
+  people: {
+    details(id: number) {
+      return tmdbFetch(`/people/${id}`);
+    },
+  },
+
+  productionCompanies: {
+    details(id: number) {
+      return tmdbFetch(`/production-companies/${id}`);
+    },
+  },
 };

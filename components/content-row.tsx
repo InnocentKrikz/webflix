@@ -5,6 +5,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { LandscapeCard, PortraitCard, RankedCard } from '@/components/media-card'
 import { ShowcaseRow } from '@/components/showcase-row'
+import { MediaGlowBoundary } from '@/components/media-card-glow'
+import { useEffects } from '@/components/providers'
 import { cn } from '@/lib/utils'
 import type { Row } from '@/lib/types'
 
@@ -43,6 +45,7 @@ function Toggle({
 
 function StandardContentRow({ row }: { row: Row }) {
   const scroller = useRef<HTMLDivElement>(null)
+  const { reducedEffects } = useEffects()
   const [filter, setFilter] = useState<'movie' | 'tv'>('movie')
   const [canScrollLeft, setCanScrollLeft] = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(false)
@@ -58,7 +61,10 @@ function StandardContentRow({ row }: { row: Row }) {
   const scroll = (dir: -1 | 1) => {
     const el = scroller.current
     if (!el) return
-    el.scrollBy({ left: dir * el.clientWidth * 0.85, behavior: 'smooth' })
+    el.scrollBy({
+      left: dir * el.clientWidth * 0.85,
+      behavior: reducedEffects ? 'auto' : 'smooth',
+    })
   }
 
   const updateScrollState = useCallback(() => {
@@ -84,7 +90,7 @@ function StandardContentRow({ row }: { row: Row }) {
   if (titles.length === 0) return null
 
   return (
-    <section className="group/row relative py-3 md:max-2xl:py-2">
+    <section className="group/row relative z-10 overflow-visible py-3 md:max-2xl:py-2">
       <div className="mb-2 flex items-center gap-3 px-4 md:px-12 md:max-2xl:mb-1 md:max-2xl:px-8">
         <h2 className="relative flex items-center gap-2 font-heading text-lg font-bold md:text-xl">
           <span className="h-5 w-1 rounded-full bg-primary" />
@@ -93,7 +99,7 @@ function StandardContentRow({ row }: { row: Row }) {
         {row.filterable && <Toggle groupId={row.id} value={filter} onChange={setFilter} />}
       </div>
 
-      <div className="relative mx-4 overflow-hidden md:mx-12 md:max-2xl:mx-8">
+      <MediaGlowBoundary className="relative isolate mx-4 overflow-visible md:mx-12 md:max-2xl:mx-8">
         {canScrollLeft && (
           <button
             onClick={() => scroll(-1)}
@@ -107,7 +113,7 @@ function StandardContentRow({ row }: { row: Row }) {
         <div
           ref={scroller}
           onScroll={updateScrollState}
-          className={cn('no-scrollbar relative flex gap-2.5 overflow-x-auto overscroll-x-contain scroll-smooth pb-8 pt-2 md:gap-3 md:max-2xl:gap-2.5 md:max-2xl:pb-6 md:max-2xl:pt-1', kind === 'ranked' && 'items-end')}
+          className={cn('no-scrollbar relative flex gap-2.5 overflow-x-auto overscroll-x-contain scroll-smooth px-3 pb-8 pt-2 md:gap-3 md:max-2xl:gap-2.5 md:max-2xl:pb-6 md:max-2xl:pt-1', kind === 'ranked' && 'items-end')}
         >
           <AnimatePresence mode="popLayout">
             {titles.map((t, i) => (
@@ -140,7 +146,7 @@ function StandardContentRow({ row }: { row: Row }) {
             <ChevronRight className="size-8 transition-transform hover:scale-125" />
           </button>
         )}
-      </div>
+      </MediaGlowBoundary>
     </section>
   )
 }

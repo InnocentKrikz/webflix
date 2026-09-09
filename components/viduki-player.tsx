@@ -6,6 +6,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { ArrowLeft, Check, ListVideo, Server, SkipBack, SkipForward } from 'lucide-react'
 import { isEpisodeReleased, nextPlaybackTarget, previousPlaybackTarget, resolvePlayback, type PlaybackTarget } from '@/lib/availability'
 import { cn, parseDurationToSeconds } from '@/lib/utils'
+import { ensureViewerIdentity, recordTitleView } from '@/lib/viewer-client'
 import {
   buildProviderUrl,
   getPlayerProvider,
@@ -16,13 +17,19 @@ import {
 import type { Title } from '@/lib/types'
 
 const VIDUKI_PROGRESS_KEY = 'vidukinet-Progress'
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:3005'
+const BACKEND_URL = '/api/backend'
 
 type JsonRecord = Record<string, unknown>
 
 type VidukiProgress = {
   watched?: number | string
   duration?: number | string
+}
+
+type SharedProgress = {
+  progressSeconds: number
+  durationSeconds: number
+  completed: boolean
 }
 
 function asRecord(value: unknown): JsonRecord | null {
@@ -83,6 +90,8 @@ export function ProviderPlayer({
 }) {
   const router = useRouter()
   const iframeRef = useRef<HTMLIFrameElement>(null)
+  const latestProgress = useRef<SharedProgress | null>(null)
+  const progressReadyKey = useRef<string | null>(null)
   const lastSavedProgress = useRef('')
   const overlayHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [fallbackProviderId, setFallbackProviderId] = useState<PlayerProviderId>(providerId)
@@ -129,10 +138,70 @@ export function ProviderPlayer({
     ? parseDurationToSeconds(episode.duration)
     : parseDurationToSeconds(title.runtime)
   const activeProvider = getPlayerProvider(fallbackProviderId)
+  const progressKey = `${title.id}:${seasonNumber ?? ''}:${episodeNumber ?? ''}`
+  const [resumeAt, setResumeAt] = useState(0)
+  const [progressReady, setProgressReady] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    progressReadyKey.current = null
+    latestProgress.current = null
+    lastSavedProgress.current = ''
+    setProgressReady(false)
+    setResumeAt(0)
+
+    const params = new URLSearchParams({
+      mediaType: title.type === 'tv' ? 'TV' : 'MOVIE',
+      tmdbId: String(tmdbId),
+    })
+    if (title.type === 'tv') {
+      params.set('seasonNumber', String(seasonNumber ?? 1))
+      params.set('episodeNumber', String(episodeNumber ?? 1))
+    }
+
+    ensureViewerIdentity()
+      .then(() => fetch(`${BACKEND_URL}/progress?${params.toString()}`, { credentials: 'include' }))
+      .then((response) => {
+        if (!response.ok) throw new Error('Unable to load progress')
+        return response.json() as Promise<{ progress?: { progressSeconds?: number; durationSeconds?: number; completed?: boolean } } | null>
+      })
+      .then((payload) => {
+        if (cancelled) return
+        const saved = payload?.progress
+        const durationSeconds = Math.max(0, finiteNumber(saved?.durationSeconds) ?? fallbackDuration)
+        const progressSeconds = Math.min(durationSeconds || Number.POSITIVE_INFINITY, Math.max(0, finiteNumber(saved?.progressSeconds) ?? 0))
+        latestProgress.current = {
+          progressSeconds,
+          durationSeconds,
+          completed: saved?.completed === true || (durationSeconds > 0 && progressSeconds / durationSeconds >= 0.9),
+        }
+        setResumeAt(progressSeconds)
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) {
+          progressReadyKey.current = progressKey
+          setProgressReady(true)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [episodeNumber, fallbackDuration, progressKey, seasonNumber, title.type, tmdbId])
+
+  const viewLoggedFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (!progressReady || viewLoggedFor.current === title.id) return
+    viewLoggedFor.current = title.id
+    void recordTitleView(title.id).catch(() => {
+      if (viewLoggedFor.current === title.id) viewLoggedFor.current = null
+    })
+  }, [progressReady, title.id])
 
   const url = useMemo(
-    () => buildProviderUrl(activeProvider, title, tmdbId, seasonNumber, episodeNumber),
-    [activeProvider, episodeNumber, seasonNumber, title, tmdbId],
+    () => buildProviderUrl(activeProvider, title, tmdbId, seasonNumber, episodeNumber, resumeAt),
+    [activeProvider, episodeNumber, resumeAt, seasonNumber, title, tmdbId],
   )
 
   const currentTarget: PlaybackTarget = { seasonIndex, episodeIndex }
@@ -155,34 +224,12 @@ export function ProviderPlayer({
     [title],
   )
 
-  const goToEpisode = useCallback((next: PlaybackTarget | null) => {
-    if (!next) return
-    const nextSeason = title.seasons?.[next.seasonIndex]
-    const nextEpisode = nextSeason?.episodes[next.episodeIndex]
-    if (!nextSeason || !nextEpisode || !isEpisodeReleased(title, nextSeason, nextEpisode)) return
-    lastSavedProgress.current = ''
-    setSeasonIndex(next.seasonIndex)
-    setEpisodeIndex(next.episodeIndex)
-  }, [title])
+  const saveProgress = useCallback((progress: SharedProgress) => {
+    if (!Number.isInteger(tmdbId) || tmdbId <= 0 || progressReadyKey.current !== progressKey) return
+    if (progress.durationSeconds <= 0 || progress.progressSeconds <= 0) return
 
-  const saveProgress = useCallback((payload: unknown) => {
-    if (!Number.isInteger(tmdbId) || tmdbId <= 0) return
-
-    try {
-      window.localStorage.setItem(VIDUKI_PROGRESS_KEY, JSON.stringify(payload))
-    } catch {
-      // Storage can be unavailable in privacy-restricted browser contexts.
-    }
-
-    const mediaRecord = mediaRecordFor(payload, tmdbId)
-    if (!mediaRecord) return
-    const progress = episodeProgressFor(mediaRecord, seasonNumber, episodeNumber)
-    const watched = finiteNumber(progress?.watched)
-    const duration = finiteNumber(progress?.duration) ?? fallbackDuration
-    if (watched === null || duration <= 0 || watched <= 0) return
-
-    const progressSeconds = Math.min(duration, Math.max(0, watched))
-    const signature = `${title.id}:${seasonNumber ?? ''}:${episodeNumber ?? ''}:${Math.floor(progressSeconds)}:${duration}`
+    const progressSeconds = Math.min(progress.durationSeconds, Math.max(0, progress.progressSeconds))
+    const signature = `${progressKey}:${Math.floor(progressSeconds)}:${progress.durationSeconds}`
     if (lastSavedProgress.current === signature) return
     lastSavedProgress.current = signature
 
@@ -197,16 +244,71 @@ export function ProviderPlayer({
         seasonNumber: title.type === 'tv' ? seasonNumber ?? 1 : null,
         episodeNumber: title.type === 'tv' ? episodeNumber ?? 1 : null,
         progressSeconds,
-        durationSeconds: duration,
-        completed: progressSeconds / duration >= 0.9,
+        durationSeconds: progress.durationSeconds,
+        completed: progress.completed || progressSeconds / progress.durationSeconds >= 0.9,
       }),
     }).then((response) => {
       if (!response.ok) throw new Error('Progress was not saved')
-      window.dispatchEvent(new Event('webflix:activity'))
+      window.dispatchEvent(new Event('sceneflix:activity'))
     }).catch(() => {
       if (lastSavedProgress.current === signature) lastSavedProgress.current = ''
     })
-  }, [episodeNumber, fallbackDuration, seasonNumber, title, tmdbId])
+  }, [episodeNumber, progressKey, seasonNumber, title, tmdbId])
+
+  const progressFromVidukiData = useCallback((payload: unknown): SharedProgress | null => {
+    const mediaRecord = mediaRecordFor(payload, tmdbId)
+    if (!mediaRecord) return null
+    const progress = episodeProgressFor(mediaRecord, seasonNumber, episodeNumber)
+    const watched = finiteNumber(progress?.watched)
+    const durationSeconds = finiteNumber(progress?.duration) ?? fallbackDuration
+    if (watched === null || durationSeconds <= 0) return null
+    return {
+      progressSeconds: Math.min(durationSeconds, Math.max(0, watched)),
+      durationSeconds,
+      completed: durationSeconds > 0 && watched / durationSeconds >= 0.9,
+    }
+  }, [episodeNumber, fallbackDuration, seasonNumber, tmdbId])
+
+  const flushProgress = useCallback(() => {
+    if (latestProgress.current) saveProgress(latestProgress.current)
+  }, [saveProgress])
+
+  const goToEpisode = useCallback((next: PlaybackTarget | null) => {
+    if (!next) return
+    const nextSeason = title.seasons?.[next.seasonIndex]
+    const nextEpisode = nextSeason?.episodes[next.episodeIndex]
+    if (!nextSeason || !nextEpisode || !isEpisodeReleased(title, nextSeason, nextEpisode)) return
+
+    // Flush the provider's last event while the current season/episode is still
+    // in scope, otherwise it can be attributed to the episode being opened.
+    flushProgress()
+    latestProgress.current = null
+    progressReadyKey.current = null
+    lastSavedProgress.current = ''
+    setProgressReady(false)
+    setResumeAt(0)
+
+    // Keep the watch URL shareable/bookmarkable without asking Next to navigate
+    // or reload the server-rendered page.
+    const url = new URL(window.location.href)
+    url.searchParams.set('s', String(nextSeason.number))
+    url.searchParams.set('e', String(nextEpisode.number))
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`)
+
+    setSeasonIndex(next.seasonIndex)
+    setEpisodeIndex(next.episodeIndex)
+  }, [flushProgress, title])
+
+  const switchProvider = useCallback((nextProviderId: PlayerProviderId) => {
+    const progress = latestProgress.current
+    if (progress) {
+      saveProgress(progress)
+      setResumeAt(progress.progressSeconds)
+    }
+    setFallbackProviderId(nextProviderId)
+    onProviderChange?.(nextProviderId)
+    revealOverlayControls()
+  }, [onProviderChange, revealOverlayControls, saveProgress])
 
   useEffect(() => {
     function onMessage(event: MessageEvent<unknown>) {
@@ -217,24 +319,53 @@ export function ProviderPlayer({
       if (!data) return
 
       if (activeProvider.kind === 'viduki' && data.type === 'viduki:all-servers-failed') {
-        setFallbackProviderId((current) => {
-          const currentIndex = VIDUKI_PROVIDERS.findIndex((provider) => provider.id === current)
-          const nextProvider = VIDUKI_PROVIDERS[currentIndex + 1]
-          if (!nextProvider) return current
-          onProviderChange?.(nextProvider.id)
-          return nextProvider.id
-        })
+        const currentIndex = VIDUKI_PROVIDERS.findIndex((provider) => provider.id === fallbackProviderId)
+        const nextProvider = VIDUKI_PROVIDERS[currentIndex + 1]
+        if (nextProvider) switchProvider(nextProvider.id)
         return
       }
 
-      if (activeProvider.kind === 'viduki' && data.type === 'MEDIA_DATA') saveProgress(data.data)
+      if (activeProvider.kind === 'viduki' && data.type === 'MEDIA_DATA') {
+        try {
+          window.localStorage.setItem(VIDUKI_PROGRESS_KEY, JSON.stringify(data.data))
+        } catch {
+          // Storage can be unavailable in privacy-restricted browser contexts.
+        }
+        const progress = progressFromVidukiData(data.data)
+        if (progress && progressReadyKey.current === progressKey) {
+          latestProgress.current = progress
+          saveProgress(progress)
+        }
+        return
+      }
+
+      if (data.type === 'PLAYER_EVENT') {
+        const eventData = asRecord(data.data)
+        const progressSeconds = finiteNumber(eventData?.player_progress)
+        const durationSeconds = Math.max(0, finiteNumber(eventData?.player_duration) ?? fallbackDuration)
+        if (progressSeconds === null || durationSeconds <= 0) return
+        const status = eventData?.player_status
+        const progress = {
+          progressSeconds: Math.min(durationSeconds, Math.max(0, progressSeconds)),
+          durationSeconds,
+          completed: status === 'completed' || progressSeconds / durationSeconds >= 0.9,
+        }
+        if (progressReadyKey.current === progressKey) {
+          latestProgress.current = progress
+          saveProgress(progress)
+        }
+      }
     }
 
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
-  }, [activeProvider, onProviderChange, saveProgress])
+  }, [activeProvider, fallbackDuration, fallbackProviderId, onProviderChange, progressFromVidukiData, progressKey, saveProgress, switchProvider])
 
   if (!target) return null
+
+  if (!progressReady) {
+    return <main className="h-screen w-screen bg-black" aria-busy="true" />
+  }
 
   return (
     <main
@@ -252,14 +383,14 @@ export function ProviderPlayer({
         className="absolute inset-0 size-full border-0"
       />
       <div
-        className="absolute inset-y-0 left-0 z-10 w-28 cursor-pointer"
+        className="absolute left-0 top-0 z-10 h-24 w-16 cursor-pointer"
         onMouseEnter={revealOverlayControls}
         onTouchStart={revealOverlayControls}
         onClick={() => setShowOverlayControls((visible) => !visible)}
         aria-hidden="true"
       />
       <div
-        className="absolute inset-y-0 right-0 z-10 w-28 cursor-pointer"
+        className="absolute right-0 top-0 z-10 h-24 w-16 cursor-pointer"
         onMouseEnter={revealOverlayControls}
         onTouchStart={revealOverlayControls}
         onClick={() => setShowOverlayControls((visible) => !visible)}
@@ -320,9 +451,7 @@ export function ProviderPlayer({
                 <DropdownMenu.Item
                   key={provider.id}
                   onSelect={() => {
-                    setFallbackProviderId(provider.id)
-                    onProviderChange?.(provider.id)
-                    revealOverlayControls()
+                    switchProvider(provider.id)
                   }}
                   className="flex cursor-pointer items-center justify-between gap-3 rounded-xl px-3 py-2.5 outline-none transition-colors data-[highlighted]:bg-white/10"
                 >

@@ -13,7 +13,7 @@ export type MatchEntry = {
   error: string | null
 }
 export const EMPTY_MATCH: MatchEntry = { match: null, status: 'loading', saving: false, error: null }
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:3005'
+const BACKEND_URL = '/api/backend'
 
 function mediaRef(id: string) {
   const match = /^(movie|tv)-(\d+)$/.exec(id)
@@ -21,7 +21,7 @@ function mediaRef(id: string) {
   return { mediaType: match[1] === 'tv' ? 'TV' : 'MOVIE', tmdbId: Number(match[2]) }
 }
 
-/** A session-scoped store: catalog HTML and public title caches contain no user scores. */
+/** A viewer-scoped store: public catalog responses contain no viewer scores. */
 export class MatchStore {
   private entries = new Map<string, MatchEntry>()
   private active = new Map<string, number>()
@@ -56,7 +56,7 @@ export class MatchStore {
   }
 
   request = (id: string) => {
-    if (!this.userId || (this.entries.has(id) && this.versions.get(id) === this.generation)) return
+    if (this.entries.has(id) && this.versions.get(id) === this.generation) return
     this.entries.set(id, { ...this.get(id), status: 'loading' })
     this.versions.set(id, this.generation)
     if (this.entries.size > 1000) {
@@ -112,7 +112,7 @@ export class MatchStore {
   }
 
   refresh = () => {
-    if (!this.userId || this.disposed) return
+    if (this.disposed) return
     this.generation++
     this.controllers.forEach((controller) => controller.abort())
     this.queue.clear()
@@ -122,7 +122,7 @@ export class MatchStore {
   }
 
   rate = async (id: string, value: FeedbackValue | null) => {
-    if (!this.userId || this.disposed || this.get(id).saving) return false
+    if (this.disposed || this.get(id).saving) return false
     this.request(id)
     this.entries.set(id, { ...this.get(id), saving: true, error: null })
     this.emit()

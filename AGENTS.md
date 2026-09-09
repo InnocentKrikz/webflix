@@ -27,7 +27,7 @@ There is currently no test or lint script in `package.json`. Run the production 
 - Keep TypeScript strict and use the `@/*` path alias for imports from the repository root.
 - Respect server/client boundaries. Files that import `server-only`, Prisma, or secrets must remain server-side and must not be imported by client components.
 - Route application data through the helpers in `lib/data.ts` and `lib/tmdb.ts` rather than duplicating API-shape normalization in components.
-- Keep authenticated requests pointed at the backend Better Auth origin and use `credentials: 'include'` so the session cookie is sent.
+- Route browser authentication and authenticated API requests through the same-origin `/api/auth` and `/api/backend` proxies so HttpOnly cookies remain on the frontend domain.
 - The frontend expects the backend API at `http://127.0.0.1:3005` during local development. Keep credentials in local environment files; never commit secrets or copy values from `.env` into source code.
 - Treat generated Prisma output as generated code. Change `prisma/schema.prisma` and regenerate rather than editing generated files directly.
 - Preserve existing visual patterns and responsive behavior when modifying the media cards, rows, browser, hero, or detail modal.

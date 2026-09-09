@@ -69,6 +69,7 @@ export function buildProviderUrl(
   tmdbId: number,
   seasonNumber?: number,
   episodeNumber?: number,
+  startAt = 0,
 ) {
   if (provider.kind === 'viduki') {
     const kind = title.type === 'tv' ? 'tv' : 'movie'
@@ -76,7 +77,9 @@ export function buildProviderUrl(
       ? `${provider.api}/${kind}/${tmdbId}/${seasonNumber}/${episodeNumber}`
       : `${provider.api}/${kind}/${tmdbId}`
 
-    return `${provider.origin}/${path}?color=e01621`
+    const query = new URLSearchParams({ color: 'e01621' })
+    if (startAt > 0) query.set('startAt', String(Math.floor(startAt)))
+    return `${provider.origin}/${path}?${query.toString()}`
   }
 
   const kind = title.type === 'tv' ? 'tv' : 'movie'
@@ -84,5 +87,7 @@ export function buildProviderUrl(
     ? `embed/${kind}/${tmdbId}/${seasonNumber}/${episodeNumber}`
     : `embed/${kind}/${tmdbId}`
 
-  return `${provider.origin}/${path}?autoplay=1&color=e50914`
+  const query = new URLSearchParams({ autoplay: '1', color: 'e50914' })
+  if (startAt > 0) query.set(provider.id === 'vidsrc-sbs' ? 't' : 'startAt', String(Math.floor(startAt)))
+  return `${provider.origin}/${path}?${query.toString()}`
 }

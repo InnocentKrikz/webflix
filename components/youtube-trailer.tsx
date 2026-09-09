@@ -9,6 +9,7 @@ type YouTubePlayer = {
   unMute: () => void
   pauseVideo: () => void
   playVideo: () => void
+  getCurrentTime: () => number
   destroy: () => void
 }
 
@@ -19,7 +20,7 @@ type YouTubePlayerOptions = {
   playerVars?: Record<string, number>
   events?: {
     onReady?: (event: { target: YouTubePlayer }) => void
-    onStateChange?: (event: { data: number }) => void
+    onStateChange?: (event: { data: number; target: YouTubePlayer }) => void
     onError?: (event: { data: number }) => void
   }
 }
@@ -77,23 +78,24 @@ export const YouTubeTrailer = forwardRef<
     onPlaybackChange: (playing: boolean) => void
     onMuteChange: (muted: boolean) => void
     onReadyChange: (ready: boolean) => void
+    onTimeUpdate?: (currentTime: number) => void
     onError?: () => void
     visible?: boolean
   }
 >(function YouTubeTrailer(
-  { videoKey, playing, muted, onEnded, onPlaybackChange, onMuteChange, onReadyChange, onError, visible = true },
+  { videoKey, playing, muted, onEnded, onPlaybackChange, onMuteChange, onReadyChange, onTimeUpdate, onError, visible = true },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null)
   const playerRef = useRef<YouTubePlayer | null>(null)
   const endedRef = useRef(onEnded)
-  const latestRef = useRef({ playing, muted, onPlaybackChange, onReadyChange, onError })
+  const latestRef = useRef({ playing, muted, onPlaybackChange, onReadyChange, onTimeUpdate, onError })
   const readyRef = useRef(false)
   const [playerReady, setPlayerReady] = useState(false)
   const [isPlaying, setIsPlaying] = useState(false)
 
   endedRef.current = onEnded
-  latestRef.current = { playing, muted, onPlaybackChange, onReadyChange, onError }
+  latestRef.current = { playing, muted, onPlaybackChange, onReadyChange, onTimeUpdate, onError }
 
   const updatePlayback = (nextPlaying: boolean) => {
     setIsPlaying(nextPlaying)
@@ -139,7 +141,7 @@ export const YouTubeTrailer = forwardRef<
     readyRef.current = false
     setPlayerReady(false)
     setIsPlaying(false)
-    onReadyChange(false)
+    latestRef.current.onReadyChange(false)
 
     // YouTube replaces its target. Only give it an imperative child, never
     // a node React owns. React leaves this empty host's children alone.
@@ -180,14 +182,16 @@ export const YouTubeTrailer = forwardRef<
               readyRef.current = true
               setPlayerReady(true)
               latestRef.current.onReadyChange(true)
+              latestRef.current.onTimeUpdate?.(target.getCurrentTime())
               if (latestRef.current.muted) target.mute()
               else target.unMute()
               if (latestRef.current.playing) {
                 target.playVideo()
               }
             },
-            onStateChange: ({ data }) => {
+            onStateChange: ({ data, target }) => {
               if (cancelled || !readyRef.current || !container.isConnected) return
+              latestRef.current.onTimeUpdate?.(target.getCurrentTime())
               if (data === 1 || data === 2 || data === 0) {
                 setIsPlaying(data === 1)
                 latestRef.current.onPlaybackChange(data === 1)
@@ -224,7 +228,7 @@ export const YouTubeTrailer = forwardRef<
         container.replaceChildren()
       }
     }
-  }, [onReadyChange, videoKey])
+  }, [videoKey])
 
   useEffect(() => {
     const player = playerRef.current
@@ -246,6 +250,20 @@ export const YouTubeTrailer = forwardRef<
     if (muted) player.mute()
     else player.unMute()
   }, [muted, playerReady])
+
+  useEffect(() => {
+    const player = playerRef.current
+    if (!player || !playerReady || !readyRef.current || !onTimeUpdate) return
+
+    const updateTime = () => {
+      if (!readyRef.current) return
+      const currentTime = player.getCurrentTime()
+      if (Number.isFinite(currentTime)) latestRef.current.onTimeUpdate?.(currentTime)
+    }
+    updateTime()
+    const interval = window.setInterval(updateTime, 350)
+    return () => window.clearInterval(interval)
+  }, [onTimeUpdate, playerReady, videoKey])
 
   return (
     <div

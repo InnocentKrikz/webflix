@@ -75,7 +75,7 @@ export function Hero({ titles }: { titles: Title[] }) {
           >
             <div className="mb-4 flex items-center gap-2">
               <span className="rounded bg-primary px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary-foreground">
-                Webflix
+                Sceneflix
               </span>
               <span className="text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                 {title.type === 'tv' ? 'Series' : 'Film'}
@@ -172,7 +172,7 @@ export function Hero({ titles }: { titles: Title[] }) {
       </div>
 
       {/* right controls: mute + maturity */}
-      <div className="absolute bottom-24 right-4 z-10 flex items-center gap-3 md:bottom-28 md:right-8">
+      <div className="absolute bottom-4 right-4 z-20 hidden items-center gap-3 md:flex md:bottom-28 md:right-8">
         {/* <button
           onClick={() => setMuted((m) => !m)}
           aria-label={muted ? 'Unmute' : 'Mute'}

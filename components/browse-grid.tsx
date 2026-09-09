@@ -3,6 +3,7 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { SearchX } from 'lucide-react'
 import { PortraitCard } from '@/components/media-card'
+import { MediaGlowBoundary } from '@/components/media-card-glow'
 import type { Title } from '@/lib/types'
 
 export function BrowseGrid({ titles, emptyLabel }: { titles: Title[]; emptyLabel?: string }) {
@@ -21,21 +22,23 @@ export function BrowseGrid({ titles, emptyLabel }: { titles: Title[]; emptyLabel
   }
 
   return (
-    <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7">
-      <AnimatePresence mode="popLayout">
-        {titles.map((t, i) => (
-          <motion.div
-            key={t.id}
-            layout
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.92 }}
-            transition={{ duration: 0.3, delay: Math.min(i * 0.03, 0.3) }}
-          >
-            <PortraitCard title={t} artworkOnly className="w-full sm:w-full md:w-full" />
-          </motion.div>
-        ))}
-      </AnimatePresence>
-    </div>
+    <MediaGlowBoundary className="relative isolate overflow-visible">
+      <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7">
+        <AnimatePresence mode="popLayout">
+          {titles.map((t, i) => (
+            <motion.div
+              key={t.id}
+              layout
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.92 }}
+              transition={{ duration: 0.3, delay: Math.min(i * 0.03, 0.3) }}
+            >
+              <PortraitCard title={t} artworkOnly className="w-full sm:w-full md:w-full" />
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+    </MediaGlowBoundary>
   )
 }

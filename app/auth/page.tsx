@@ -1,11 +1,17 @@
 'use client'
 
-import { FormEvent, useState } from 'react'
+import Image from 'next/image'
+import { FormEvent, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Loader2, MessageCircle, Phone } from 'lucide-react'
+import { ArrowLeft, Check, Loader2, X } from 'lucide-react'
+import PhoneInput, { isValidPhoneNumber, type Value } from 'react-phone-number-input'
 import { authClient } from '@/lib/auth-client'
 
 type AuthMode = 'signin' | 'signup'
+
+function isValidUsername(value: string) {
+  return /^[a-zA-Z0-9_.]{3,30}$/.test(value)
+}
 
 function errorMessage(error: unknown) {
   if (!error || typeof error !== 'object') return 'Something went wrong. Please try again.'
@@ -16,12 +22,83 @@ function errorMessage(error: unknown) {
 export default function AuthPage() {
   const router = useRouter()
   const [mode, setMode] = useState<AuthMode>('signin')
-  const [phoneNumber, setPhoneNumber] = useState('')
+  const [phoneNumber, setPhoneNumber] = useState<Value>()
+  const [username, setUsername] = useState('')
+  const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null)
+  const [usernameChecking, setUsernameChecking] = useState(false)
+  const [submittedPhoneNumber, setSubmittedPhoneNumber] = useState('')
   const [code, setCode] = useState('')
   const [codeSent, setCodeSent] = useState(false)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (mode !== 'signup') {
+      setUsernameAvailable(null)
+      setUsernameChecking(false)
+      return
+    }
+
+    const value = username.trim()
+    setUsernameAvailable(null)
+    setUsernameChecking(false)
+    if (!value || !isValidUsername(value)) return
+
+    let cancelled = false
+    const timer = window.setTimeout(async () => {
+      setUsernameChecking(true)
+      try {
+        const response = await fetch('/api/auth/is-username-available', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ username: value }),
+        })
+        const data = (await response.json()) as { available?: boolean }
+        if (!cancelled) setUsernameAvailable(response.ok && data.available === true)
+      } catch {
+        if (!cancelled) setUsernameAvailable(null)
+      } finally {
+        if (!cancelled) setUsernameChecking(false)
+      }
+    }, 350)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [mode, username])
+
+  async function checkUsername(value: string) {
+    const normalized = value.trim()
+    if (!isValidUsername(normalized)) {
+      setUsernameAvailable(false)
+      setError('Username must be 3–30 characters using letters, numbers, underscores, or periods.')
+      return false
+    }
+
+    setUsernameChecking(true)
+    try {
+      const response = await fetch('/api/auth/is-username-available', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ username: normalized }),
+      })
+      const data = (await response.json()) as { available?: boolean }
+      const available = response.ok && data.available === true
+      setUsernameAvailable(available)
+      if (!available) setError('That username is already taken. Please choose another one.')
+      return available
+    } catch {
+      setUsernameAvailable(null)
+      setError('We could not check that username. Please try again.')
+      return false
+    } finally {
+      setUsernameChecking(false)
+    }
+  }
 
   async function signInWithDiscord() {
     setBusy(true)
@@ -42,14 +119,30 @@ export default function AuthPage() {
     setError('')
     setMessage('')
 
-    const result = await authClient.phoneNumber.sendOtp({ phoneNumber })
+    if (mode === 'signup') {
+      const available = await checkUsername(username)
+      if (!available) {
+        setBusy(false)
+        return
+      }
+    }
+
+    const normalizedPhoneNumber = phoneNumber?.trim()
+    if (!normalizedPhoneNumber || !isValidPhoneNumber(normalizedPhoneNumber)) {
+      setError('Enter a valid phone number and choose the correct country.')
+      setBusy(false)
+      return
+    }
+
+    const result = await authClient.phoneNumber.sendOtp({ phoneNumber: normalizedPhoneNumber })
     if (result.error) {
       setError(errorMessage(result.error))
     } else {
+      setSubmittedPhoneNumber(normalizedPhoneNumber)
       setCodeSent(true)
       setMessage(
         mode === 'signup'
-          ? 'Code sent. Verifying it will create your Webflix account.'
+          ? 'Code sent. Verifying it will create your Sceneflix account.'
           : 'Code sent. Check your phone to finish signing in.',
       )
     }
@@ -62,8 +155,9 @@ export default function AuthPage() {
     setError('')
 
     const result = await authClient.phoneNumber.verify({
-      phoneNumber,
+      phoneNumber: submittedPhoneNumber,
       code,
+      ...(mode === 'signup' ? { username: username.trim() } : {}),
       callbackURL: '/',
     })
 
@@ -79,19 +173,23 @@ export default function AuthPage() {
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-background px-4 py-16">
-      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-card/90 p-6 shadow-2xl shadow-black/40 backdrop-blur-xl sm:p-8">
+      <div className="w-full max-w-md rounded-2xl bg-card/90 p-6 shadow-2xl shadow-black/40 backdrop-blur-xl sm:p-8">
         <button
           type="button"
           onClick={() => router.push('/')}
           className="mb-8 inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
-          <ArrowLeft className="size-4" /> Back to Webflix
+          <ArrowLeft className="size-4" /> Back to Sceneflix
         </button>
 
         <div className="mb-8">
-          <p className="font-display text-2xl font-extrabold text-primary">
-            WEB<span className="text-foreground">FLIX</span>
-          </p>
+          <Image
+            src="/sceneflix/sceneflix-long-logo.png"
+            alt="Sceneflix"
+            width={2172}
+            height={724}
+            className="h-auto w-44"
+          />
           <h1 className="mt-5 font-display text-3xl font-extrabold tracking-tight">
             {mode === 'signup' ? 'Join the stream' : 'Welcome back'}
           </h1>
@@ -108,6 +206,8 @@ export default function AuthPage() {
               onClick={() => {
                 setMode(item)
                 setCodeSent(false)
+                setCode('')
+                setSubmittedPhoneNumber('')
                 setError('')
                 setMessage('')
               }}
@@ -126,7 +226,7 @@ export default function AuthPage() {
           disabled={busy}
           className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#5865F2] font-semibold text-white transition-colors hover:bg-[#4752C4] disabled:cursor-not-allowed disabled:opacity-60"
         >
-          <MessageCircle className="size-4" /> Continue with Discord
+           Continue with Discord
         </button>
 
         <div className="my-6 flex items-center gap-3 text-xs uppercase tracking-[0.2em] text-muted-foreground">
@@ -134,19 +234,62 @@ export default function AuthPage() {
         </div>
 
         <form onSubmit={codeSent ? verifyCode : sendCode} className="space-y-3">
+          {mode === 'signup' && (
+            <>
+              <label className="block text-sm font-medium" htmlFor="username">
+                Username
+              </label>
+              <div className="relative">
+                <input
+                  id="username"
+                  type="text"
+                  required
+                  minLength={3}
+                  maxLength={30}
+                  autoComplete="username"
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  placeholder="your_username"
+                  disabled={codeSent}
+                  className="h-11 w-full rounded-lg border border-white/10 bg-secondary px-3 pr-10 text-sm outline-none transition-colors focus:border-primary disabled:opacity-60"
+                />
+                {!usernameChecking && usernameAvailable === true && (
+                  <Check className="absolute right-3 top-1/2 size-4 -translate-y-1/2 text-emerald-400" />
+                )}
+                {!usernameChecking && usernameAvailable === false && (
+                  <X className="absolute right-3 top-1/2 size-4 -translate-y-1/2 text-red-400" />
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground" aria-live="polite">
+                {usernameChecking
+                  ? 'Checking username…'
+                  : usernameAvailable === true
+                    ? 'Username is available.'
+                    : '3–30 characters: letters, numbers, underscores, or periods.'}
+              </p>
+            </>
+          )}
+
           <label className="block text-sm font-medium" htmlFor="phone-number">
             Phone number
           </label>
-          <div className="relative">
-            <Phone className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <input
-              id="phone-number"
-              type="tel"
-              required
+          <div className="flex gap-2">
+            <PhoneInput
+              defaultCountry="US"
               value={phoneNumber}
-              onChange={(event) => setPhoneNumber(event.target.value)}
-              placeholder="+1 555 123 4567"
-              className="h-11 w-full rounded-lg border border-white/10 bg-secondary pl-10 pr-3 text-sm outline-none transition-colors focus:border-primary"
+              onChange={setPhoneNumber}
+              disabled={codeSent}
+              countrySelectProps={{
+                'aria-label': 'Country calling code',
+                unicodeFlags: true,
+              }}
+              numberInputProps={{
+                id: 'phone-number',
+                required: true,
+                placeholder: '555 123 4567',
+                autoComplete: 'tel-national',
+              }}
+              className="auth-phone-input h-11 w-full rounded-lg border border-white/10 bg-secondary px-3 text-sm outline-none transition-colors focus-within:border-primary disabled:opacity-60"
             />
           </div>
 
@@ -192,9 +335,9 @@ export default function AuthPage() {
         {message && <p className="mt-4 text-sm text-emerald-400">{message}</p>}
         {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
 
-        <p className="mt-8 text-center text-xs leading-relaxed text-muted-foreground">
+        {/* <p className="mt-8 text-center text-xs leading-relaxed text-muted-foreground">
           Phone verification is required for phone sign-in. In local development, the OTP is printed by the backend until an SMS webhook is configured.
-        </p>
+        </p> */}
       </div>
     </main>
   )

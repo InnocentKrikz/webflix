@@ -5,9 +5,10 @@ import type { ReactNode } from 'react'
 import { ContentRow } from '@/components/content-row'
 import { useCatalog } from '@/components/providers'
 import { authClient } from '@/lib/auth-client'
+import { ensureViewerIdentity } from '@/lib/viewer-client'
 import type { Personalization, ProgressItem, Row, Title } from '@/lib/types'
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:3005'
+const BACKEND_URL = '/api/backend'
 
 function titleIdForProgress(item: ProgressItem) {
   return `${item.mediaType === 'TV' ? 'tv' : 'movie'}-${item.tmdbId}`
@@ -30,27 +31,30 @@ function mergeWatchProgress(titles: Title[], progress: ProgressItem[]) {
   })
 }
 
-export function PersonalizedRows({ children, initialPersonalization = null }: { children?: ReactNode; initialPersonalization?: Personalization | null }) {
+export function PersonalizedRows({
+  children,
+  initialPersonalization = null,
+  initialTrendingGenreRecommendations = null,
+}: {
+  children?: ReactNode
+  initialPersonalization?: Personalization | null
+  initialTrendingGenreRecommendations?: Personalization | null
+}) {
   const { data: session, isPending } = authClient.useSession()
   const { registerTitles } = useCatalog()
   const [personalization, setPersonalization] = useState<Personalization | null>(initialPersonalization)
   const [titles, setTitles] = useState(() => mergeWatchProgress(initialPersonalization?.titles ?? [], initialPersonalization?.continueWatching ?? []))
 
   useEffect(() => {
-    registerTitles(titles)
-  }, [registerTitles, titles])
+    registerTitles([...titles, ...(initialTrendingGenreRecommendations?.titles ?? [])])
+  }, [initialTrendingGenreRecommendations, registerTitles, titles])
 
   useEffect(() => {
     if (isPending) return
-    if (!session) {
-      setPersonalization(null)
-      setTitles([])
-      return
-    }
-
     let cancelled = false
     const load = async () => {
       try {
+        await ensureViewerIdentity()
         const response = await fetch(`${BACKEND_URL}/progress`, { credentials: 'include' })
         if (!response.ok) return
         const data = (await response.json()) as Personalization
@@ -60,18 +64,18 @@ export function PersonalizedRows({ children, initialPersonalization = null }: { 
         setTitles(loadedTitles)
         registerTitles(loadedTitles)
       } catch {
-        if (!cancelled) setPersonalization(null)
+        if (!cancelled && !initialPersonalization) setPersonalization(null)
       }
     }
 
-    if (!initialPersonalization) void load()
+    void load()
     const refresh = () => { void load() }
-    window.addEventListener('webflix:activity', refresh)
+    window.addEventListener('sceneflix:activity', refresh)
     return () => {
       cancelled = true
-      window.removeEventListener('webflix:activity', refresh)
+      window.removeEventListener('sceneflix:activity', refresh)
     }
-  }, [initialPersonalization, isPending, registerTitles, session])
+  }, [isPending, registerTitles, session?.user.id])
 
   const rows = useMemo<Row[]>(() => {
     if (!personalization) return []
@@ -92,30 +96,36 @@ export function PersonalizedRows({ children, initialPersonalization = null }: { 
       titles: ids.map((item) => byId.get(`${item.mediaType === 'TV' ? 'tv' : 'movie'}-${item.tmdbId}`)).filter((item): item is Title => Boolean(item)),
     })
 
-    const genreRows = personalization.genres.map((genre) => ({
-      id: `genre-${genre.id}`,
-      title: `More ${genre.name}`,
-      kind: 'landscape' as const,
-      addLogo: true,
-      addText: true,
-      titles: [...genre.movieIds.map((tmdbId) => byId.get(`movie-${tmdbId}`)), ...genre.tvIds.map((tmdbId) => byId.get(`tv-${tmdbId}`))].filter((item): item is Title => Boolean(item)),
-      filterable: true,
-      variants: {
-        movie: { title: `${genre.name} Movies`, kind: 'landscape' as const, titles: genre.movieIds.map((tmdbId) => byId.get(`movie-${tmdbId}`)).filter((item): item is Title => Boolean(item)) },
-        tv: { title: `${genre.name} TV Shows`, kind: 'landscape' as const, titles: genre.tvIds.map((tmdbId) => byId.get(`tv-${tmdbId}`)).filter((item): item is Title => Boolean(item)) },
-      },
-    }))
-
     return [
       withProgress.length > 0 ? { id: 'continue-watching', title: 'Continue Watching', kind: 'landscape', addLogo: true, addText: true, titles: withProgress } : null,
       personalization.becauseWatched ? recommendationRow('because-watched', `Because you watched ${personalization.becauseWatched.title}`, personalization.becauseWatched.ids) : null,
       personalization.becauseActors ? recommendationRow('because-actors', `Because you watched ${personalization.becauseActors.actors.map((actor) => actor.name).join(' & ')}`, personalization.becauseActors.ids) : null,
-      ...genreRows,
+      personalization.becauseLiked ? recommendationRow('because-liked', `Because you liked ${personalization.becauseLiked.title}`, personalization.becauseLiked.ids) : null,
     ].filter((row) => row !== null && row.titles.length > 0) as Row[]
   }, [personalization, titles])
 
-  const topRows = rows.filter((row) => !row.id.startsWith('genre-'))
-  const genreRows = rows.filter((row) => row.id.startsWith('genre-'))
+  const genreRows = useMemo<Row[]>(() => {
+    if (!initialTrendingGenreRecommendations) return []
+    const byId = new Map(initialTrendingGenreRecommendations.titles.map((title) => [title.id, title]))
+
+    return initialTrendingGenreRecommendations.genres
+      .map((genre) => ({
+        id: `trending-genre-${genre.id}`,
+        title: `Trending ${genre.name}`,
+        kind: 'landscape' as const,
+        addLogo: true,
+        addText: true,
+        titles: [...genre.movieIds.map((tmdbId) => byId.get(`movie-${tmdbId}`)), ...genre.tvIds.map((tmdbId) => byId.get(`tv-${tmdbId}`))].filter((item): item is Title => Boolean(item)),
+        filterable: true,
+        variants: {
+          movie: { title: `Trending ${genre.name} Movies`, kind: 'landscape' as const, titles: genre.movieIds.map((tmdbId) => byId.get(`movie-${tmdbId}`)).filter((item): item is Title => Boolean(item)) },
+          tv: { title: `Trending ${genre.name} TV Shows`, kind: 'landscape' as const, titles: genre.tvIds.map((tmdbId) => byId.get(`tv-${tmdbId}`)).filter((item): item is Title => Boolean(item)) },
+        },
+      }))
+      .filter((row) => row.titles.length > 0)
+  }, [initialTrendingGenreRecommendations])
+
+  const topRows = rows
 
   return (
     <>

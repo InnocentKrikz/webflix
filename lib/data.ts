@@ -3,6 +3,7 @@ import "server-only";
 import { headers } from "next/headers";
 import { tmdb } from "./tmdb";
 import { isTitleReleased, isSeasonReleased } from "./availability";
+import { withFallbackDominantColors } from "./title-colors";
 import type {
   CastMember,
   Episode,
@@ -14,7 +15,13 @@ import type {
   Title,
   TitleBadge,
   Trailer,
+  TrailerColorSample,
   Personalization,
+  PersonCredit,
+  PersonPage,
+  ProductionCompany,
+  ProductionCompanyPage,
+  ProductionCompanySummary,
 } from "./types";
 
 const POSTER_SIZE = "w500";
@@ -27,7 +34,7 @@ const IMAGE_BASE_URL = "https://image.tmdb.org/t/p";
 const MAX_GRID_TITLES = 42;
 const MAX_ROW_TITLES = 14;
 const MAX_FEATURED_TITLES = 5;
-const MAX_SHOWCASE_TITLES = 5;
+const MAX_SHOWCASE_TITLES = 20;
 const MAX_CAST = 12;
 const MAX_TRAILERS = 6;
 const RECENT_BADGE_WINDOW_DAYS = 30;
@@ -60,6 +67,18 @@ type ApiPerson = {
   profile_path?: string | null;
 };
 
+type ApiProductionCompany = {
+  id?: number;
+  tmdbId?: number;
+  name?: string;
+  logoPath?: string | null;
+  logo_path?: string | null;
+  originCountry?: string | null;
+  origin_country?: string | null;
+  order?: number | null;
+  productionCompany?: ApiProductionCompany;
+};
+
 type ApiCast = {
   id?: number | string;
   character?: string | null;
@@ -80,8 +99,23 @@ type ApiVideo = {
   name?: string;
   site?: string;
   official?: boolean;
+  iso6391?: string | null;
+  iso_639_1?: string | null;
   publishedAt?: string | null;
   published_at?: string | null;
+  trailerAnalysis?: {
+    samples?: ApiTrailerColorSample[];
+  } | null;
+};
+
+type ApiTrailerColorSample = {
+  timestamp?: number;
+  averageColor?: string;
+  leftColor?: string;
+  centerColor?: string;
+  rightColor?: string;
+  topColor?: string;
+  bottomColor?: string;
 };
 
 type ApiImage = {
@@ -140,6 +174,8 @@ type ApiMovie = {
   id?: number;
   tmdbId?: number;
   title?: string;
+  logo?: string;
+  viewCount?: number | null;
   originalTitle?: string | null;
   original_title?: string | null;
   overview?: string | null;
@@ -148,6 +184,9 @@ type ApiMovie = {
   poster_path?: string | null;
   backdropPath?: string | null;
   backdrop_path?: string | null;
+  dominantColor1?: string | null;
+  dominantColor2?: string | null;
+  dominantColor3?: string | null;
   releaseDate?: string | null;
   release_date?: string | null;
   runtime?: number | null;
@@ -169,12 +208,16 @@ type ApiMovie = {
   spoken_languages?: { english_name?: string; name?: string }[];
   images?: ApiImages;
   keywords?: ApiKeyword[];
+  productionCompanies?: ApiProductionCompany[];
+  production_companies?: ApiProductionCompany[];
 };
 
 type ApiTvShow = {
   id?: number;
   tmdbId?: number;
   name?: string;
+  logo?: string;
+  viewCount?: number | null;
   originalName?: string | null;
   original_name?: string | null;
   overview?: string | null;
@@ -183,6 +226,9 @@ type ApiTvShow = {
   poster_path?: string | null;
   backdropPath?: string | null;
   backdrop_path?: string | null;
+  dominantColor1?: string | null;
+  dominantColor2?: string | null;
+  dominantColor3?: string | null;
   firstAirDate?: string | null;
   first_air_date?: string | null;
   lastAirDate?: string | null;
@@ -213,6 +259,8 @@ type ApiTvShow = {
   spoken_languages?: { english_name?: string; name?: string }[];
   images?: ApiImages;
   keywords?: ApiKeyword[];
+  productionCompanies?: ApiProductionCompany[];
+  production_companies?: ApiProductionCompany[];
 };
 
 type ApiMediaListItem = {
@@ -221,11 +269,46 @@ type ApiMediaListItem = {
   index?: number;
   mediaType?: "MOVIE" | "TV" | "movie" | "tv";
   category?: string | null;
+  viewCount?: number | null;
   movie?: ApiMovie | null;
   tvShow?: ApiTvShow | null;
 };
 
 type ApiMedia = ApiMovie | ApiTvShow;
+
+type ApiPersonCredit = ApiCast & {
+  media_type?: "movie" | "tv";
+  title?: string;
+  name?: string;
+  poster_path?: string | null;
+  backdrop_path?: string | null;
+  release_date?: string | null;
+  first_air_date?: string | null;
+  movie?: ApiMovie;
+  tvShow?: ApiTvShow;
+};
+
+type ApiPersonPage = ApiPerson & {
+  biography?: string | null;
+  knownForDepartment?: string | null;
+  known_for_department?: string | null;
+  birthday?: string | null;
+  deathday?: string | null;
+  placeOfBirth?: string | null;
+  place_of_birth?: string | null;
+  movieCast?: ApiPersonCredit[];
+  tvCast?: ApiPersonCredit[];
+  combined_credits?: { cast?: ApiPersonCredit[] };
+};
+
+type ApiCompanyPage = ApiProductionCompany & {
+  movies?: { movie?: ApiMovie; order?: number | null }[];
+  tvShows?: { tvShow?: ApiTvShow; order?: number | null }[];
+};
+
+type ApiProductionCompanySummary = ApiProductionCompany & {
+  _count?: { movies?: number; tvShows?: number };
+};
 
 type HomeBundle = {
   featuredItems?: unknown;
@@ -240,7 +323,10 @@ type HomeBundle = {
   movieUpcomingItems?: unknown;
   tvUpcomingItems?: unknown;
   personalization?: unknown;
+  trendingGenreRecommendations?: unknown;
   databasePersonalizedItems?: unknown;
+  databaseTrendingGenreItems?: unknown;
+  productionCompanyItems?: unknown;
 };
 
 function isStatusResponse(value: unknown): value is ApiStatusResponse {
@@ -261,6 +347,15 @@ async function readList(request: Promise<unknown>): Promise<ApiMediaListItem[]> 
 }
 
 async function readMedia<T extends ApiMedia>(request: Promise<unknown>): Promise<T | null> {
+  try {
+    const result = unwrapResults<unknown>(await request);
+    return result && typeof result === "object" ? (result as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function readObject<T>(request: Promise<unknown>): Promise<T | null> {
   try {
     const result = unwrapResults<unknown>(await request);
     return result && typeof result === "object" ? (result as T) : null;
@@ -380,14 +475,57 @@ function mapCast(cast: ApiCast[] = []): CastMember[] {
     .sort((a, b) => (a.castOrder ?? a.order ?? 999) - (b.castOrder ?? b.order ?? 999))
     .slice(0, MAX_CAST)
     .map((item) => {
-      const person = item.person ?? item;
+      const person = item.person;
+      const rawId = person?.tmdbId ?? person?.id ?? item.id;
+      const id = Number(rawId);
 
       return {
-        name: person.name ?? person.original_name ?? "Unknown",
+        id: Number.isInteger(id) && id > 0 ? id : undefined,
+        name: person?.name ?? person?.original_name ?? item.name ?? item.original_name ?? "Unknown",
         character: item.character ?? "",
-        photo: imageUrl(person.profilePath ?? person.profile_path, PROFILE_SIZE),
+        photo: imageUrl(person?.profilePath ?? person?.profile_path ?? item.profilePath ?? item.profile_path, PROFILE_SIZE),
       };
     });
+}
+
+function mapProductionCompanies(companies: ApiProductionCompany[] = []): ProductionCompany[] {
+  return companies
+    .map<ProductionCompany | null>((item, index) => {
+      const company = item.productionCompany ?? item;
+      const id = Number(company.tmdbId ?? company.id);
+      if (!Number.isInteger(id) || id <= 0 || !company.name) return null;
+
+      return {
+        id,
+        name: company.name,
+        logo: imageUrl(company.logoPath ?? company.logo_path, LOGO_SIZE),
+        originCountry: company.originCountry ?? company.origin_country ?? undefined,
+        order: item.order ?? index,
+      };
+    })
+    .filter((company): company is ProductionCompany => company !== null)
+    .sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+}
+
+function mapProductionCompanySummaries(value: unknown): ProductionCompanySummary[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map<ProductionCompanySummary | null>((item) => {
+      if (!item || typeof item !== "object") return null;
+      const company = item as ApiProductionCompanySummary;
+      const id = Number(company.tmdbId ?? company.id);
+      if (!Number.isInteger(id) || id <= 0 || !company.name) return null;
+
+      return {
+        id,
+        name: company.name,
+        logo: imageUrl(company.logoPath ?? company.logo_path, LOGO_SIZE),
+        originCountry: company.originCountry ?? company.origin_country ?? undefined,
+        titleCount: (company._count?.movies ?? 0) + (company._count?.tvShows ?? 0),
+      } satisfies ProductionCompanySummary;
+    })
+    .filter((company): company is ProductionCompanySummary => Boolean(company));
 }
 
 function videoList(videos: ApiMovie["videos"] | ApiTvShow["videos"]): ApiVideo[] {
@@ -400,19 +538,52 @@ function mapTrailers(videos: ApiMovie["videos"] | ApiTvShow["videos"]): Trailer[
     .filter((video) => video.key && video.site === "YouTube")
     .sort((a, b) => {
       const priority = (video: ApiVideo) => {
-        const type = video.videoType ?? video.type;
-        if (type === "Trailer") return 0;
-        if (type === "Teaser") return 1;
-        if (type === "Clip") return 2;
-        return 3;
+      const type = video.videoType ?? video.type;
+        const typeRank = type === "Trailer" ? 0 : type === "Teaser" ? 100 : type === "Clip" ? 200 : 300;
+        const officialRank = video.official ? 0 : 20;
+        const name = video.name?.toLowerCase() ?? "";
+        const nameRank = name.includes("official trailer") ? 0 : name.includes("trailer") ? 2 : 4;
+        const language = video.iso6391 ?? video.iso_639_1;
+        const languageRank = language === "en" ? 0 : language ? 2 : 1;
+        return typeRank + officialRank + nameRank + languageRank;
       };
-      return priority(a) - priority(b);
+      const priorityDifference = priority(a) - priority(b);
+      if (priorityDifference !== 0) return priorityDifference;
+      const firstPublished = Date.parse(a.publishedAt ?? a.published_at ?? "") || 0;
+      const secondPublished = Date.parse(b.publishedAt ?? b.published_at ?? "") || 0;
+      return secondPublished - firstPublished;
     })
     .slice(0, MAX_TRAILERS)
     .map((video, index) => {
       const type = video.videoType ?? video.type ?? "Clip";
       const kind: Trailer["kind"] = type === "Trailer" ? "Trailer" : "Clip";
       const key = video.key ?? "";
+      const colorPattern = /^#[0-9a-f]{6}$/i;
+      const timeline = (video.trailerAnalysis?.samples ?? [])
+        .map<TrailerColorSample | null>((sample) => {
+          const colors = [
+            sample.averageColor,
+            sample.leftColor,
+            sample.centerColor,
+            sample.rightColor,
+            sample.topColor,
+            sample.bottomColor,
+          ];
+          if (!Number.isFinite(sample.timestamp) || !colors.every((color) => color && colorPattern.test(color))) {
+            return null;
+          }
+          return {
+            timestamp: sample.timestamp!,
+            average: sample.averageColor!,
+            left: sample.leftColor!,
+            center: sample.centerColor!,
+            right: sample.rightColor!,
+            top: sample.topColor!,
+            bottom: sample.bottomColor!,
+          };
+        })
+        .filter((sample): sample is TrailerColorSample => sample !== null)
+        .sort((a, b) => a.timestamp - b.timestamp);
 
       return {
         id: String(video.id ?? key ?? index),
@@ -420,6 +591,7 @@ function mapTrailers(videos: ApiMovie["videos"] | ApiTvShow["videos"]): Trailer[
         title: video.name ?? kind,
         kind,
         thumbnail: key ? `https://img.youtube.com/vi/${key}/hqdefault.jpg` : "",
+        timeline,
       };
     });
 }
@@ -543,7 +715,7 @@ function badgesForTv(firstAirDate: string | null | undefined, seasons: ApiSeason
 
 function creatorFromMovie(movie: ApiMovie): string {
   const director = movie.credits?.crew?.find((person) => person.job === "Director")?.name;
-  return director ?? movie.originalTitle ?? movie.original_title ?? movie.title ?? "Webflix";
+  return director ?? movie.originalTitle ?? movie.original_title ?? movie.title ?? "Sceneflix";
 }
 
 function creatorFromTv(tv: ApiTvShow): string {
@@ -551,7 +723,7 @@ function creatorFromTv(tv: ApiTvShow): string {
     || tv.originalName
     || tv.original_name
     || tv.name
-    || "Webflix";
+    || "Sceneflix";
 }
 
 function similarIds(source: Title, catalog: Title[]): string[] {
@@ -578,8 +750,13 @@ function hydratePersonalization(value: unknown, catalog: Title[], databaseItems:
     continueWatching: Array.isArray(raw.continueWatching) ? raw.continueWatching : [],
     becauseWatched: raw.becauseWatched ?? null,
     becauseActors: raw.becauseActors ?? null,
+    becauseLiked: raw.becauseLiked ?? null,
     genres: Array.isArray(raw.genres) ? raw.genres : [],
-    titles: raw.titles.map((title) => byId.get(title.id) ?? title),
+    titles: raw.titles.map((title) => {
+      const hydrated = byId.get(title.id);
+      if (!hydrated) return title;
+      return { ...title, ...hydrated, logo: hydrated.logo || title.logo };
+    }),
   };
 }
 
@@ -609,16 +786,21 @@ function mapMovie(movie: ApiMovie, catalog: Title[] = []): Title | null {
     tagline: movie.tagline || "",
     description: movie.overview || "No description available yet.",
     poster: imageUrl(movie.posterPath ?? movie.poster_path, POSTER_SIZE),
-    logo: logoUrl(movie.images),
+    logo: movie.logo || logoUrl(movie.images),
     backdrop: imageUrl(movie.backdropPath ?? movie.backdrop_path, BACKDROP_SIZE),
+    dominantColor1: movie.dominantColor1 ?? null,
+    dominantColor2: movie.dominantColor2 ?? null,
+    dominantColor3: movie.dominantColor3 ?? null,
     creator: creatorFromMovie(movie),
     status: movie.status ?? "",
     keywords: keywords.length > 0 ? keywords : keywordsFrom(genres, "movie", movie.status),
     cast: mapCast(movie.cast ?? movie.credits?.cast),
+    productionCompanies: mapProductionCompanies(movie.productionCompanies ?? movie.production_companies),
     similar: [],
     trailers: mapTrailers(movie.videos),
     badges,
     badge: badges[0],
+    viewCount: typeof movie.viewCount === 'number' && Number.isFinite(movie.viewCount) ? movie.viewCount : undefined,
     detailsLoaded: hasDetailedMediaData(movie),
   };
 
@@ -654,17 +836,22 @@ function mapTvShow(tv: ApiTvShow, catalog: Title[] = []): Title | null {
     tagline: tv.tagline || "",
     description: tv.overview || "No description available yet.",
     poster: imageUrl(tv.posterPath ?? tv.poster_path, POSTER_SIZE),
-    logo: logoUrl(tv.images),
+    logo: tv.logo || logoUrl(tv.images),
     backdrop: imageUrl(tv.backdropPath ?? tv.backdrop_path, BACKDROP_SIZE),
+    dominantColor1: tv.dominantColor1 ?? null,
+    dominantColor2: tv.dominantColor2 ?? null,
+    dominantColor3: tv.dominantColor3 ?? null,
     creator: creatorFromTv(tv),
     status: tv.status ?? "",
     keywords: keywords.length > 0 ? keywords : keywordsFrom(genres, "tv", tv.status),
     cast: mapCast(tv.cast ?? tv.credits?.cast),
+    productionCompanies: mapProductionCompanies(tv.productionCompanies ?? tv.production_companies),
     seasons: mapSeasons(tv.seasons, maturity, imageUrl(tv.backdropPath ?? tv.backdrop_path, BACKDROP_SIZE)),
     similar: [],
     trailers: mapTrailers(tv.videos),
     badges,
     badge: badges[0],
+    viewCount: typeof tv.viewCount === 'number' && Number.isFinite(tv.viewCount) ? tv.viewCount : undefined,
     detailsLoaded: hasDetailedMediaData(tv),
   };
 
@@ -674,22 +861,27 @@ function mapTvShow(tv: ApiTvShow, catalog: Title[] = []): Title | null {
 }
 
 function mapListItem(item: ApiMediaListItem, catalog: Title[] = []): Title | null {
+  let mapped: Title | null = null;
   if ((item.mediaType === "MOVIE" || item.mediaType === "movie") && item.movie) {
-    return mapMovie(item.movie, catalog);
+    mapped = mapMovie(item.movie, catalog);
+  } else if ((item.mediaType === "TV" || item.mediaType === "tv") && item.tvShow) {
+    mapped = mapTvShow(item.tvShow, catalog);
+  } else if (item.movie) {
+    mapped = mapMovie(item.movie, catalog);
+  } else if (item.tvShow) {
+    mapped = mapTvShow(item.tvShow, catalog);
+  } else if ('title' in item) {
+    mapped = mapMovie(item as ApiMovie, catalog);
+  } else if ('name' in item && !('known_for_department' in item)) {
+    mapped = mapTvShow(item as ApiTvShow, catalog);
   }
 
-  if ((item.mediaType === "TV" || item.mediaType === "tv") && item.tvShow) {
-    return mapTvShow(item.tvShow, catalog);
-  }
-
-  if (item.movie) return mapMovie(item.movie, catalog);
-  if (item.tvShow) return mapTvShow(item.tvShow, catalog);
-
-  // Unsynced TMDB lists contain raw media instead of database relation wrappers.
-  if ('title' in item) return mapMovie(item as ApiMovie, catalog);
-  if ('name' in item && !('known_for_department' in item)) return mapTvShow(item as ApiTvShow, catalog);
-
-  return null;
+  if (!mapped) return null;
+  return {
+    ...mapped,
+    mediaListCategory: item.category ?? mapped.mediaListCategory,
+    viewCount: typeof item.viewCount === 'number' && Number.isFinite(item.viewCount) ? item.viewCount : mapped.viewCount,
+  };
 }
 
 function mapList(items: ApiMediaListItem[], catalog: Title[] = []): Title[] {
@@ -699,13 +891,17 @@ function mapList(items: ApiMediaListItem[], catalog: Title[] = []): Title[] {
 }
 
 function uniqueTitles(groups: Title[][]): Title[] {
-  const seen = new Set<string>();
+  const indexById = new Map<string, number>();
   const titles: Title[] = [];
 
   for (const group of groups) {
     for (const title of group) {
-      if (seen.has(title.id)) continue;
-      seen.add(title.id);
+      const existingIndex = indexById.get(title.id);
+      if (existingIndex !== undefined) {
+        titles[existingIndex] = withFallbackDominantColors(titles[existingIndex]!, title);
+        continue;
+      }
+      indexById.set(title.id, titles.length);
       titles.push(title);
     }
   }
@@ -807,7 +1003,7 @@ function applyFilters(titles: Title[], options: { type?: BrowserType; genre?: st
   return result;
 }
 
-export async function getHomeData(): Promise<{ featuredTitles: Title[]; rows: Row[]; titles: Title[]; personalization: Personalization | null }> {
+export async function getHomeData(): Promise<{ featuredTitles: Title[]; rows: Row[]; titles: Title[]; personalization: Personalization | null; trendingGenreRecommendations: Personalization | null; productionCompanies: ProductionCompanySummary[] }> {
   const bundle = await readHomeBundle();
   const featuredItems = homeItems(bundle, "featuredItems");
   const movieTrendingItems = homeItems(bundle, "movieTrendingItems");
@@ -940,18 +1136,27 @@ export async function getHomeData(): Promise<{ featuredTitles: Title[]; rows: Ro
     },
   ];
 
+  const trendingGenreRecommendations = hydratePersonalization(
+    bundle.trendingGenreRecommendations,
+    [],
+    homeItems(bundle, "databaseTrendingGenreItems"),
+  );
+  const allTitles = uniqueTitles([badgeTopTen(withSimilar), trendingGenreRecommendations?.titles ?? []]);
+
   return {
     featuredTitles: badgeTopTen(hydrate(featured).slice(0, MAX_FEATURED_TITLES)).map((title) => ({
       ...title,
       featured: true,
     })),
     rows,
-    titles: badgeTopTen(withSimilar),
+    titles: allTitles,
+    productionCompanies: mapProductionCompanySummaries(bundle.productionCompanyItems),
     personalization: hydratePersonalization(
       bundle.personalization,
-      badgeTopTen(withSimilar),
+      allTitles,
       homeItems(bundle, "databasePersonalizedItems"),
     ),
+    trendingGenreRecommendations,
   };
 }
 
@@ -1043,6 +1248,104 @@ export async function getBySlug(slug: string): Promise<Title | undefined> {
 
   const titles = await catalog();
   return titles.find((title) => title.slug === slug);
+}
+
+function personCreditKey(credit: PersonCredit): string {
+  return credit.title.id;
+}
+
+function mapPersonCredit(item: ApiPersonCredit, type: MediaType): PersonCredit | null {
+  const media = type === "movie" ? item.movie ?? item : item.tvShow ?? item;
+  const title = type === "movie" ? mapMovie(media as ApiMovie) : mapTvShow(media as ApiTvShow);
+  if (!title) return null;
+
+  return {
+    title,
+    character: item.character ?? undefined,
+    order: item.castOrder ?? item.order ?? undefined,
+  };
+}
+
+function mapPersonCredits(items: ApiPersonCredit[], type: MediaType): PersonCredit[] {
+  const seen = new Set<string>();
+  return items
+    .slice()
+    .sort((a, b) => (a.castOrder ?? a.order ?? 999) - (b.castOrder ?? b.order ?? 999))
+    .map((item) => mapPersonCredit(item, type))
+    .filter((credit): credit is PersonCredit => {
+      if (!credit || seen.has(personCreditKey(credit))) return false;
+      seen.add(personCreditKey(credit));
+      return true;
+    });
+}
+
+function mapPersonPage(raw: ApiPersonPage): PersonPage | null {
+  const id = Number(raw.tmdbId ?? raw.id);
+  if (!Number.isInteger(id) || id <= 0 || !raw.name) return null;
+
+  const storedMovies = raw.movieCast ?? [];
+  const storedTv = raw.tvCast ?? [];
+  const combined = raw.combined_credits?.cast ?? [];
+  const movieCredits = mapPersonCredits(
+    storedMovies.length > 0 ? storedMovies : combined.filter((credit) => credit.media_type === "movie"),
+    "movie",
+  );
+  const tvCredits = mapPersonCredits(
+    storedTv.length > 0 ? storedTv : combined.filter((credit) => credit.media_type === "tv"),
+    "tv",
+  );
+
+  return {
+    id,
+    name: raw.name,
+    biography: raw.biography ?? "",
+    photo: imageUrl(raw.profilePath ?? raw.profile_path, "w500"),
+    knownForDepartment: raw.knownForDepartment ?? raw.known_for_department ?? undefined,
+    birthday: raw.birthday ?? undefined,
+    deathday: raw.deathday ?? undefined,
+    placeOfBirth: raw.placeOfBirth ?? raw.place_of_birth ?? undefined,
+    movieCredits,
+    tvCredits,
+  };
+}
+
+function mapCompanyMedia(
+  items: { movie?: ApiMovie; tvShow?: ApiTvShow; order?: number | null }[],
+  type: MediaType,
+): Title[] {
+  return items
+    .slice()
+    .sort((a, b) => (a.order ?? 999) - (b.order ?? 999))
+    .map((item) => type === "movie" ? item.movie && mapMovie(item.movie) : item.tvShow && mapTvShow(item.tvShow))
+    .filter((title): title is Title => Boolean(title));
+}
+
+function mapProductionCompanyPage(raw: ApiCompanyPage): ProductionCompanyPage | null {
+  const id = Number(raw.tmdbId ?? raw.id);
+  if (!Number.isInteger(id) || id <= 0 || !raw.name) return null;
+
+  return {
+    id,
+    name: raw.name,
+    logo: imageUrl(raw.logoPath ?? raw.logo_path, LOGO_SIZE),
+    originCountry: raw.originCountry ?? raw.origin_country ?? undefined,
+    movies: mapCompanyMedia(raw.movies ?? [], "movie"),
+    tvShows: mapCompanyMedia(raw.tvShows ?? [], "tv"),
+  };
+}
+
+export async function getPerson(id: number): Promise<PersonPage | undefined> {
+  if (!Number.isInteger(id) || id <= 0) return undefined;
+  const raw = await readObject<ApiPersonPage>(tmdb.people.details(id) as Promise<unknown>);
+  const person = raw ? mapPersonPage(raw) : null;
+  return person ?? undefined;
+}
+
+export async function getProductionCompany(id: number): Promise<ProductionCompanyPage | undefined> {
+  if (!Number.isInteger(id) || id <= 0) return undefined;
+  const raw = await readObject<ApiCompanyPage>(tmdb.productionCompanies.details(id) as Promise<unknown>);
+  const company = raw ? mapProductionCompanyPage(raw) : null;
+  return company ?? undefined;
 }
 
 export async function getGenres(type: BrowserType = "all"): Promise<string[]> {

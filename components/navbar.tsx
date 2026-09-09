@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils'
 import { authClient } from '@/lib/auth-client'
 import { useCatalog, useModal } from '@/components/providers'
 import { PortraitCard } from '@/components/media-card'
+import { MediaGlowBoundary } from '@/components/media-card-glow'
 import type { Title } from '@/lib/types'
 
 const NAV_LINKS = [
@@ -94,14 +95,14 @@ export function Navbar() {
     router.refresh()
   }
 
-  const userName = session?.user.name || 'Webflix User'
+  const userName = session?.user.username || session?.user.name || 'Sceneflix Guest'
   const userImage = session?.user.image
-  const userInitial = userName.trim().charAt(0).toUpperCase() || 'W'
+  const userInitial = userName.trim().charAt(0).toUpperCase() || 'S'
 
   return (
     <header
       className={cn(
-        'fixed inset-x-0 top-0 z-50 transition-colors duration-500',
+        'mobile-navbar-surface fixed inset-x-0 top-0 z-50 transition-colors duration-500',
         scrolled
           ? 'bg-background/85 backdrop-blur-xl border-b border-white/5'
           : 'bg-gradient-to-b from-black/80 via-black/40 to-transparent',
@@ -109,10 +110,15 @@ export function Navbar() {
     >
       <nav className="mx-auto flex h-16 max-w-[1600px] items-center gap-2 px-4 md:h-[72px] md:gap-6 md:px-8">
         {/* Logo */}
-        <Link href="/" className="group flex shrink-0 items-center">
-          <span className="font-display text-2xl font-extrabold tracking-tight text-primary md:text-[28px]">
-            WEB<span className="text-foreground">FLIX</span>
-          </span>
+        <Link href="/" aria-label="Sceneflix home" className="group flex shrink-0 items-center">
+          <Image
+            src="/sceneflix/sceneflix-long-logo.png"
+            alt="Sceneflix"
+            width={2172}
+            height={724}
+            priority
+            className="h-auto w-36 md:w-44"
+          />
         </Link>
 
         {/* Desktop links */}
@@ -187,20 +193,22 @@ export function Navbar() {
                     <div className="px-3 py-5 text-center text-sm text-muted-foreground">Searching…</div>
                   ) : searchResults.length > 0 ? (
                     <>
-                      <div className="grid grid-cols-3 gap-2">
-                        {searchResults.map((title) => (
-                          <PortraitCard
-                            key={title.id}
-                            title={title}
-                            artworkOnly
-                            className="w-full sm:w-full md:w-full"
-                            onSelect={() => {
-                              openModal(title.id)
-                              setSearchOpen(false)
-                            }}
-                          />
-                        ))}
-                      </div>
+                      <MediaGlowBoundary className="relative isolate overflow-visible">
+                        <div className="grid grid-cols-3 gap-2">
+                          {searchResults.map((title) => (
+                            <PortraitCard
+                              key={title.id}
+                              title={title}
+                              artworkOnly
+                              className="w-full sm:w-full md:w-full"
+                              onSelect={() => {
+                                openModal(title.id)
+                                setSearchOpen(false)
+                              }}
+                            />
+                          ))}
+                        </div>
+                      </MediaGlowBoundary>
                       <Link
                         href={`/search?q=${encodeURIComponent(query.trim())}`}
                         onClick={() => setSearchOpen(false)}
@@ -229,7 +237,7 @@ export function Navbar() {
           <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>
               <button className="flex items-center gap-1 rounded-sm p-1 outline-none transition-colors hover:bg-white/10">
-                 {userImage ? (<Image className="rounded-md" alt={session?.user.name} width="32" height="32" src={userImage}/>) : <span className="grid size-8 place-items-center rounded-md bg-gradient-to-br from-primary to-red-800 text-sm font-bold text-primary-foreground">
+                 {userImage ? (<Image className="rounded-md" alt={userName} width="32" height="32" src={userImage}/>) : <span className="grid size-8 place-items-center rounded-md bg-gradient-to-br from-primary to-red-800 text-sm font-bold text-primary-foreground">
                   {userInitial}
                 </span>}
                 <ChevronDown className="hidden size-4 text-muted-foreground sm:block" />
@@ -239,10 +247,10 @@ export function Navbar() {
               <DropdownMenu.Content
                 sideOffset={12}
                 align="end"
-                className="z-[60] w-56 rounded-xl border border-white/10 bg-popover/25 p-1.5 shadow-2xl backdrop-blur-xl data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
+                className="z-[60] pb-2 w-56 rounded-xl border border-white/10 bg-popover/25 p-1.5 shadow-2xl backdrop-blur-xl data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
               >
                 <div className="flex items-center gap-3 px-2 py-2">
-                 {userImage ? (<Image className="rounded-md" alt={session?.user.name} width="36" height="36" src={userImage}/>) : <span className="grid size-9 place-items-center rounded-md bg-gradient-to-br from-primary to-red-800 font-bold text-primary-foreground">
+                 {userImage ? (<Image className="rounded-md" alt={userName} width="36" height="36" src={userImage}/>) : <span className="grid size-9 place-items-center rounded-md bg-gradient-to-br from-primary to-red-800 font-bold text-primary-foreground">
                     {userInitial}
                   </span>} 
                   <div className="leading-tight">
@@ -254,12 +262,12 @@ export function Navbar() {
                     </p>
                   </div>
                 </div>
-                <DropdownMenu.Separator className="my-1 h-px bg-white/10" />
-                {!session && (
+                <DropdownMenu.Separator className="my-2 h-px bg-white/10" />
+                {/* {!session && (
                   <DropdownMenu.Item asChild className="cursor-pointer rounded-lg px-2 py-2 text-sm font-semibold text-primary outline-none transition-colors data-[highlighted]:bg-primary/10">
                     <Link href="/auth">Quick sign in</Link>
                   </DropdownMenu.Item>
-                )}
+                )} */}
                 {/* {['Manage Profiles', 'Account', 'Help Center'].map((item) => (
                   <DropdownMenu.Item
                     key={item}
@@ -274,11 +282,11 @@ export function Navbar() {
                     onSelect={signOut}
                     className="cursor-pointer rounded-lg px-2 py-2 text-sm text-primary outline-none transition-colors data-[highlighted]:bg-primary/10"
                   >
-                    Sign out of Webflix
+                    Sign out of Sceneflix
                   </DropdownMenu.Item>
                 ) : (
                   <DropdownMenu.Item asChild className="cursor-pointer rounded-lg px-2 py-2 text-sm text-primary outline-none transition-colors data-[highlighted]:bg-primary/10">
-                    <Link href="/auth">Sign in to Webflix</Link>
+                    <Link href="/auth">Sign in to Sceneflix</Link>
                   </DropdownMenu.Item>
                 )}
               </DropdownMenu.Content>
@@ -307,16 +315,20 @@ export function Navbar() {
           >
             <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setMobileOpen(false)} />
             <motion.div
-              className="absolute right-0 top-0 flex h-full w-72 flex-col gap-1 border-l border-white/10 bg-background p-6"
+              className="mobile-navbar-surface absolute right-0 top-0 flex h-full w-72 flex-col gap-1 border-l border-white/10 bg-background p-6"
               initial={{ x: '100%' }}
               animate={{ x: 0 }}
               exit={{ x: '100%' }}
               transition={{ type: 'spring', stiffness: 320, damping: 34 }}
             >
               <div className="mb-4 flex items-center justify-between">
-                <span className="font-display text-xl font-extrabold text-primary">
-                  WEB<span className="text-foreground">FLIX</span>
-                </span>
+                <Image
+                  src="/sceneflix/sceneflix-long-logo.png"
+                  alt="Sceneflix"
+                  width={2172}
+                  height={724}
+                  className="h-auto w-36"
+                />
                 <button onClick={() => setMobileOpen(false)} aria-label="Close" className="grid size-9 place-items-center rounded-full hover:bg-white/10">
                   <X className="size-5" />
                 </button>

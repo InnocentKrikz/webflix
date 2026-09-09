@@ -47,7 +47,7 @@
   --popover: oklch(0.165 0.013 25);
   --popover-foreground: oklch(0.97 0.005 60);
 
-  /* Signature Webflix red */
+  /* Signature Sceneflix red */
   --primary: oklch(0.56 0.233 25.5);
   --primary-foreground: oklch(0.99 0 0);
 
@@ -73,9 +73,15 @@
   }
   html {
     @apply bg-background;
+    max-width: 100%;
+    overflow-x: hidden;
+    overflow-x: clip;
   }
   body {
     @apply bg-background text-foreground font-sans antialiased;
+    max-width: 100%;
+    overflow-x: hidden;
+    overflow-x: clip;
   }
 
   /* Keep native scrolling visible but understated across the whole app. */
@@ -107,6 +113,41 @@
 }
 
 @layer utilities {
+  .auth-phone-input .PhoneInputCountry {
+    width: 3.5rem;
+    margin-right: 0.75rem;
+    border-right: 1px solid rgb(255 255 255 / 0.1);
+  }
+
+  .auth-phone-input .PhoneInputCountryIconUnicode {
+    font-size: 1.25rem;
+    line-height: 1;
+  }
+
+  .auth-phone-input .PhoneInputCountrySelect,
+  .auth-phone-input .PhoneInputCountrySelect option {
+    color: var(--foreground);
+    background-color: var(--secondary);
+    color-scheme: dark;
+  }
+
+  .auth-phone-input .PhoneInputCountrySelect option:checked {
+    color: var(--primary-foreground);
+    background-color: var(--primary);
+  }
+
+  .auth-phone-input .PhoneInputInput {
+    height: 100%;
+    min-width: 0;
+    background: transparent;
+    color: var(--foreground);
+    outline: none;
+  }
+
+  .auth-phone-input .PhoneInputInput::placeholder {
+    color: var(--muted-foreground);
+  }
+
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }
@@ -123,18 +164,192 @@
   }
 }
 
+/* Keep the mobile navbar and drawer legible on iOS Safari. The desktop
+   navbar intentionally uses a transparent gradient at the top of the page. */
+@media (max-width: 1023px) {
+  .mobile-navbar-surface {
+    background-color: rgba(15, 10, 10, 0.92) !important;
+    background-image: none !important;
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+}
+
+@keyframes media-card-glow-drift {
+  0%,
+  100% {
+    background-position: 0% 0%, 100% 0%, 50% 100%;
+  }
+
+  25% {
+    background-position: 100% 0%, 100% 100%, 0% 65%;
+  }
+
+  50% {
+    background-position: 100% 100%, 0% 100%, 50% 0%;
+  }
+
+  75% {
+    background-position: 0% 100%, 0% 0%, 100% 40%;
+  }
+}
+
+.media-card-glow {
+  background-image:
+    radial-gradient(ellipse at center, var(--media-card-glow-1) 0%, transparent 62%),
+    radial-gradient(ellipse at center, var(--media-card-glow-2) 0%, transparent 64%),
+    radial-gradient(ellipse at center, var(--media-card-glow-3) 0%, transparent 66%);
+  background-position: 0% 0%, 100% 0%, 50% 100%;
+  background-size: 145% 145%, 135% 135%, 145% 145%;
+  animation: media-card-glow-drift 11s ease-in-out infinite;
+  will-change: background-position;
+}
+
+.media-row-glow-layer {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  /* Expand the paint area without contributing horizontal scroll overflow. */
+  overflow: clip;
+  overflow-clip-margin: 80px;
+}
+
+.media-glow-host[data-active='true'] > .media-card-glow {
+  opacity: 0.55;
+  scale: 1.04;
+  filter: blur(22px);
+}
+
+.group:hover > .media-card-glow,
+.media-glow-host[data-active='true'] > .media-card-glow {
+  animation-duration: 8s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .media-card-glow {
+    animation: none;
+  }
+}
+
+html[data-reduce-effects] {
+  scroll-behavior: auto !important;
+}
+
+html[data-reduce-effects] *,
+html[data-reduce-effects] *::before,
+html[data-reduce-effects] *::after {
+  animation-delay: 0ms !important;
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  scroll-behavior: auto !important;
+  transition-delay: 0ms !important;
+  transition-duration: 0.01ms !important;
+}
+
+html[data-reduce-effects] .media-row-glow-layer,
+html[data-reduce-effects] .media-card-glow {
+  display: none !important;
+}
+
+html[data-reduce-effects] .text-glow {
+  text-shadow: none !important;
+}
+
+html[data-reduce-effects] [class*='backdrop-blur'] {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+.trailer-ambient-glow {
+  position: absolute;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 900ms ease;
+}
+
+.trailer-ambient-glow[data-visible='true'] {
+  opacity: 0.40;
+}
+
+/* The homepage trailer light belongs to the whole showcase, not only the
+   centre player. Its lower spill deliberately reaches behind the next row. */
+.trailer-showcase-ambient {
+  inset: -10% 0 -10%;
+}
+
+.trailer-ambient-light {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(80px);
+  transition: background-color 1200ms ease;
+  will-change: background-color;
+}
+
+.trailer-ambient-average {
+  inset: 12% 8%;
+  background-color: var(--trailer-average);
+  opacity: 0.36;
+}
+
+.trailer-ambient-left {
+  bottom: 8%;
+  left: -8%;
+  top: 8%;
+  width: 46%;
+  background-color: var(--trailer-left);
+}
+
+.trailer-ambient-center {
+  bottom: 5%;
+  left: 29%;
+  top: 14%;
+  width: 42%;
+  background-color: var(--trailer-center);
+  opacity: 0.68;
+}
+
+.trailer-ambient-right {
+  bottom: 8%;
+  right: -8%;
+  top: 8%;
+  width: 46%;
+  background-color: var(--trailer-right);
+}
+
+.trailer-ambient-top {
+  height: 42%;
+  left: 8%;
+  right: 8%;
+  top: -12%;
+  background-color: var(--trailer-top);
+}
+
+.trailer-ambient-bottom {
+  bottom: -14%;
+  height: 44%;
+  left: 8%;
+  right: 8%;
+  background-color: var(--trailer-bottom);
+}
+
+html[data-reduce-effects] .trailer-ambient-glow {
+  display: none !important;
+}
+
 /* Custom range input styling for the player scrubber */
-input[type='range'].webflix-range {
+input[type='range'].sceneflix-range {
   -webkit-appearance: none;
   appearance: none;
   background: transparent;
   cursor: pointer;
 }
-input[type='range'].webflix-range::-webkit-slider-runnable-track {
+input[type='range'].sceneflix-range::-webkit-slider-runnable-track {
   height: 5px;
   border-radius: 9999px;
 }
-input[type='range'].webflix-range::-webkit-slider-thumb {
+input[type='range'].sceneflix-range::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
   height: 14px;

@@ -7,9 +7,26 @@ export type Quality = 'HD' | '4K'
 export type TitleBadge = 'Recently Added' | 'New Season' | 'Top 10'
 
 export interface CastMember {
+  id?: number
   name: string
   character: string
   photo: string
+}
+
+export interface ProductionCompany {
+  id: number
+  name: string
+  logo: string
+  originCountry?: string
+  order?: number
+}
+
+export interface ProductionCompanySummary {
+  id: number
+  name: string
+  logo: string
+  originCountry?: string
+  titleCount: number
 }
 
 export interface Episode {
@@ -38,6 +55,17 @@ export interface Trailer {
   title: string
   kind: 'Trailer' | 'Clip'
   thumbnail: string
+  timeline: TrailerColorSample[]
+}
+
+export interface TrailerColorSample {
+  timestamp: number
+  average: string
+  left: string
+  center: string
+  right: string
+  top: string
+  bottom: string
 }
 
 export interface Title {
@@ -58,11 +86,15 @@ export interface Title {
   poster: string
   logo?: string
   backdrop: string
+  dominantColor1?: string | null
+  dominantColor2?: string | null
+  dominantColor3?: string | null
   upcoming?: boolean
   creator: string
   status: string
   keywords: string[]
   cast: CastMember[]
+  productionCompanies?: ProductionCompany[]
   seasons?: Season[]
   similar: string[]
   trailers: Trailer[]
@@ -71,6 +103,8 @@ export interface Title {
   badges?: TitleBadge[]
   badge?: TitleBadge
   featured?: boolean
+  mediaListCategory?: string
+  viewCount?: number
   watchProgress?: {
     progressPercent: number
     progressSeconds: number
@@ -95,6 +129,7 @@ export interface Personalization {
   continueWatching: ProgressItem[]
   becauseWatched: { title: string; ids: { tmdbId: number; mediaType: 'MOVIE' | 'TV' }[] } | null
   becauseActors: { actors: { id: number; name: string }[]; ids: { tmdbId: number; mediaType: 'MOVIE' | 'TV' }[] } | null
+  becauseLiked: { title: string; ids: { tmdbId: number; mediaType: 'MOVIE' | 'TV' }[] } | null
   genres: { id: number; name: string; movieIds: number[]; tvIds: number[] }[]
   titles: Title[]
 }
@@ -108,4 +143,32 @@ export interface Row {
   addText?: boolean
   filterable?: boolean
   variants?: Partial<Record<MediaType, Pick<Row, 'title' | 'kind' | 'titles' | 'addLogo' | 'addText'>>>
+}
+
+export interface PersonCredit {
+  title: Title
+  character?: string
+  order?: number
+}
+
+export interface PersonPage {
+  id: number
+  name: string
+  biography: string
+  photo: string
+  knownForDepartment?: string
+  birthday?: string
+  deathday?: string
+  placeOfBirth?: string
+  movieCredits: PersonCredit[]
+  tvCredits: PersonCredit[]
+}
+
+export interface ProductionCompanyPage {
+  id: number
+  name: string
+  logo: string
+  originCountry?: string
+  movies: Title[]
+  tvShows: Title[]
 }

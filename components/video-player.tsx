@@ -31,11 +31,12 @@ import { cn, formatTime, parseDurationToSeconds } from '@/lib/utils'
 import { authClient } from '@/lib/auth-client'
 import { isEpisodeReleased, isSeasonReleased, nextPlaybackTarget, resolvePlayback, type PlaybackTarget } from '@/lib/availability'
 import { ComingSoon } from '@/components/coming-soon'
+import { ensureViewerIdentity, recordTitleView } from '@/lib/viewer-client'
 import type { Episode, Season, Title } from '@/lib/types'
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2]
 const QUALITIES = ['Auto', '4K', '1080p', '720p', '480p']
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:3005'
+const BACKEND_URL = '/api/backend'
 
 export function VideoPlayer({
   title,
@@ -91,10 +92,10 @@ function PlayableVideoPlayer({ title, initialTarget }: { title: Title; initialTa
 
   const tmdbId = Number(title.id.split('-').at(-1))
   const mediaType = title.type === 'tv' ? 'TV' : 'MOVIE'
-  const progressKey = `${session?.user.id}:${title.id}:${isTV ? season?.number ?? seasonIdx + 1 : ''}:${isTV ? episode?.number ?? episodeIdx + 1 : ''}`
+  const progressKey = `${session?.user.id ?? 'guest'}:${title.id}:${isTV ? season?.number ?? seasonIdx + 1 : ''}:${isTV ? episode?.number ?? episodeIdx + 1 : ''}`
 
   const saveProgress = useCallback((completed = false) => {
-    if (!session || currentSessionUser.current !== session.user.id || !progressLoaded || loadedProgressKey.current !== progressKey || !Number.isFinite(tmdbId) || currentTime <= 0) return
+    if (currentSessionUser.current !== session?.user.id || !progressLoaded || loadedProgressKey.current !== progressKey || !Number.isFinite(tmdbId) || currentTime <= 0) return
     const signature = `${progressKey}:${Math.floor(currentTime)}:${duration}`
     if (lastSavedProgress.current === signature) return
     lastSavedProgress.current = signature
@@ -114,14 +115,14 @@ function PlayableVideoPlayer({ title, initialTarget }: { title: Title; initialTa
       }),
     }).then((response) => {
       if (!response.ok) throw new Error('Progress was not saved')
-      window.dispatchEvent(new Event('webflix:activity'))
+      window.dispatchEvent(new Event('sceneflix:activity'))
     }).catch(() => {
       if (lastSavedProgress.current === signature) lastSavedProgress.current = ''
     })
   }, [session, progressLoaded, progressKey, tmdbId, mediaType, isTV, season, seasonIdx, episode, episodeIdx, currentTime, duration])
 
   useEffect(() => {
-    if (!session || !Number.isFinite(tmdbId)) {
+    if (!Number.isFinite(tmdbId)) {
       setProgressLoaded(true)
       return
     }
@@ -133,7 +134,8 @@ function PlayableVideoPlayer({ title, initialTarget }: { title: Title; initialTa
       params.set('seasonNumber', String(season?.number ?? seasonIdx + 1))
       params.set('episodeNumber', String(episode?.number ?? episodeIdx + 1))
     }
-    fetch(`${BACKEND_URL}/progress?${params.toString()}`, { credentials: 'include' })
+    ensureViewerIdentity()
+      .then(() => fetch(`${BACKEND_URL}/progress?${params.toString()}`, { credentials: 'include' }))
       .then((response) => {
         if (!response.ok) throw new Error('Unable to load progress')
         return response.json()
@@ -153,13 +155,21 @@ function PlayableVideoPlayer({ title, initialTarget }: { title: Title; initialTa
     }
   }, [session?.user.id, progressKey, tmdbId, mediaType, isTV, season?.number, seasonIdx, episode?.number, episodeIdx, duration])
 
+  const viewLoggedFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (!progressLoaded || !playing || viewLoggedFor.current === title.id) return
+    viewLoggedFor.current = title.id
+    void recordTitleView(title.id).catch(() => {
+      if (viewLoggedFor.current === title.id) viewLoggedFor.current = null
+    })
+  }, [playing, progressLoaded, title.id])
+
   const latestSave = useRef(saveProgress)
   useEffect(() => {
     latestSave.current = saveProgress
   }, [saveProgress])
 
   useEffect(() => {
-    if (!session?.user.id) return
     const save = () => latestSave.current()
     const hidden = () => { if (document.visibilityState === 'hidden') save() }
     const timer = setInterval(save, 15_000)
@@ -171,7 +181,7 @@ function PlayableVideoPlayer({ title, initialTarget }: { title: Title; initialTa
       document.removeEventListener('visibilitychange', hidden)
       save()
     }
-  }, [session?.user.id, progressKey])
+  }, [progressKey])
 
   useEffect(() => {
     if (!playing) saveProgress(currentTime >= duration && duration > 0)

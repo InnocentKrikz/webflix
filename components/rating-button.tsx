@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { Check, LoaderCircle, ThumbsDown, ThumbsUp } from 'lucide-react'
 import { useMatch } from '@/components/match-provider'
@@ -9,18 +8,16 @@ import type { FeedbackValue } from '@/lib/match-client'
 import { cn } from '@/lib/utils'
 
 export function RatingButton({ id, large = false }: { id: string; large?: boolean }) {
-  const router = useRouter()
   const [open, setOpen] = useState(false)
-  const { match, saving, error, signedIn, rate } = useMatch(id)
+  const { match, saving, error, rate } = useMatch(id)
   const value = match?.feedback ?? null
   const Icon = saving ? LoaderCircle : value === 'DISLIKE' ? ThumbsDown : ThumbsUp
 
   async function select(next: FeedbackValue | null) {
-    if (!signedIn) { router.push('/auth'); return }
     if (await rate(id, next)) {
       setOpen(false)
       // Refresh other mounted clients/tabs after a successful write.
-      window.dispatchEvent(new Event('webflix:activity'))
+      window.dispatchEvent(new Event('sceneflix:activity'))
     }
   }
 

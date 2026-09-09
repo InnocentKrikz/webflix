@@ -6,7 +6,7 @@ import { Bookmark } from 'lucide-react'
 import { CatalogHydrator } from '@/components/catalog-hydrator'
 import { PageShell } from '@/components/page-shell'
 import { BrowseGrid } from '@/components/browse-grid'
-import { PageLoading } from '@/components/page-loading'
+import { BrowseGridSkeleton } from '@/components/media-skeletons'
 import { useMyList } from '@/components/providers'
 import type { Title } from '@/lib/types'
 
@@ -55,7 +55,7 @@ export default function MyListPage() {
         </motion.div>
 
         {loading ? (
-          <PageLoading label="Loading your list" />
+          <BrowseGridSkeleton />
         ) : (
           <BrowseGrid
             titles={titles}

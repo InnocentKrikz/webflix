@@ -13,17 +13,17 @@ export function MatchProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     store.activate()
-    const channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('webflix:matches') : null
+    const channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('sceneflix:matches') : null
     const refresh = () => {
       store.refresh()
       channel?.postMessage('refresh')
     }
     const onFocus = () => store.refresh()
     if (channel) channel.onmessage = () => store.refresh()
-    window.addEventListener('webflix:activity', refresh)
+    window.addEventListener('sceneflix:activity', refresh)
     window.addEventListener('focus', onFocus)
     return () => {
-      window.removeEventListener('webflix:activity', refresh)
+      window.removeEventListener('sceneflix:activity', refresh)
       window.removeEventListener('focus', onFocus)
       channel?.close()
       store.dispose()

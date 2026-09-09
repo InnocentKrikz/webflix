@@ -7,6 +7,7 @@ import { Star } from 'lucide-react'
 import { useModal } from '@/components/providers'
 import { CardActions } from '@/components/card-actions'
 import { MatchScore } from '@/components/match-score'
+import { MediaCardGlow } from '@/components/media-card-glow'
 import { cn } from '@/lib/utils'
 import { isTitleReleased } from '@/lib/availability'
 import type { Title } from '@/lib/types'
@@ -20,7 +21,7 @@ function TopBadges({ title }: { title: Title }) {
   if (badges.length === 0) return null
 
   return (
-    <div className="absolute left-0 top-10 z-10 flex max-w-[82%] flex-col items-start gap-1">
+    <div className="absolute left-0 top-10 z-10 flex max-w-[82%] flex-col items-start gap-1 transition-opacity duration-200 group-hover:opacity-0">
       {badges.map((badge) => (
         <span
           key={badge}
@@ -39,7 +40,7 @@ function TopBadges({ title }: { title: Title }) {
 
 function RatingBadge({ title }: { title: Title }) {
   return (
-    <span className="absolute left-2 top-2 z-20 inline-flex items-center gap-1 rounded-md bg-black/55 px-1.5 py-1 text-[10px] font-semibold text-white shadow-sm shadow-black/30 backdrop-blur-md">
+    <span className="absolute left-2 top-2 z-20 inline-flex items-center gap-1 rounded-md bg-black/55 px-1.5 py-1 text-[10px] font-semibold text-white shadow-sm shadow-black/30 backdrop-blur-md transition-opacity duration-200 group-hover:opacity-0">
       <Star className="size-2.5 fill-yellow-400 text-yellow-400" />
       {title.rating.toFixed(1)}
     </span>
@@ -97,13 +98,14 @@ export function PortraitCard({ title, className, addLogo = false, addText = true
 
   return (
     <motion.div
-      className={cn('group relative w-[150px] shrink-0 sm:w-[170px] md:w-[185px] md:max-lg:w-[165px]', className)}
+      className={cn('group relative isolate w-[150px] shrink-0 sm:w-[170px] md:w-[185px] md:max-lg:w-[165px]', className)}
     >
+      <MediaCardGlow colors={[title.dominantColor1, title.dominantColor2, title.dominantColor3]} />
       {/* Resting portrait poster */}
       <motion.button
         type="button"
         onClick={select}
-        className="relative block aspect-[2/3] w-full overflow-hidden rounded-md ring-1 ring-white/5"
+        className="relative z-10 block aspect-[2/3] w-full overflow-hidden rounded-md ring-1 ring-white/5"
         aria-label={title.title}
       >
         <RatingBadge title={title} />
@@ -136,10 +138,11 @@ export function LandscapeCard({ title, className, addLogo = false, addText = tru
 
   return (
     <motion.div
-      className={cn('group relative w-[230px] shrink-0 sm:w-[260px] md:w-[300px] md:max-lg:w-[270px]', className)}
+      className={cn('group relative isolate w-[230px] shrink-0 sm:w-[260px] md:w-[300px] md:max-lg:w-[270px]', className)}
       whileHover={{ scale: 1.06, zIndex: 30 }}
       transition={{ type: 'spring', stiffness: 300, damping: 24 }}
     >
+      <MediaCardGlow colors={[title.dominantColor1, title.dominantColor2, title.dominantColor3]} />
       <div
         role="button"
         tabIndex={0}
@@ -150,7 +153,7 @@ export function LandscapeCard({ title, className, addLogo = false, addText = tru
             select()
           }
         }}
-        className="relative block aspect-video w-full cursor-pointer overflow-hidden rounded-md ring-1 ring-white/5"
+        className="relative z-10 block aspect-video w-full cursor-pointer overflow-hidden rounded-md ring-1 ring-white/5"
         aria-label={title.title}
       >
         <RatingBadge title={title} />
@@ -203,18 +206,19 @@ export function RankedCard({ title, rank, addLogo = false, addText = true }: { t
   return (
     <motion.button
       onClick={() => open(title.id)}
-      className="group relative flex h-[210px] w-[290px] shrink-0 items-end sm:h-[240px] sm:w-[320px]"
+      className="group relative isolate flex h-[210px] w-[290px] shrink-0 items-end sm:h-[240px] sm:w-[320px]"
       whileHover={{ scale: 1.04, zIndex: 30 }}
       transition={{ type: 'spring', stiffness: 300, damping: 24 }}
       aria-label={`${title.title}, ranked number ${rank}`}
     >
+      <MediaCardGlow colors={[title.dominantColor1, title.dominantColor2, title.dominantColor3]} />
       <span
         className="select-none font-heading text-[150px] font-black leading-none text-transparent sm:text-[180px]"
         style={{ WebkitTextStroke: '3px hsl(var(--muted-foreground) / 0.4)' }}
       >
         {rank}
       </span>
-      <div className="relative -ml-6 aspect-[2/3] h-full overflow-hidden rounded-md ring-1 ring-white/10">
+      <div className="relative z-10 -ml-6 aspect-[2/3] h-full overflow-hidden rounded-md ring-1 ring-white/10">
         <RatingBadge title={title} />
         <TopBadges title={title} />
         <SideBadges title={title} />
