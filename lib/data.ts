@@ -1,5 +1,6 @@
 import "server-only";
 
+import { headers } from "next/headers";
 import { tmdb } from "./tmdb";
 import { isTitleReleased, isSeasonReleased } from "./availability";
 import type {
@@ -13,6 +14,7 @@ import type {
   Title,
   TitleBadge,
   Trailer,
+  Personalization,
 } from "./types";
 
 const POSTER_SIZE = "w500";
@@ -225,6 +227,22 @@ type ApiMediaListItem = {
 
 type ApiMedia = ApiMovie | ApiTvShow;
 
+type HomeBundle = {
+  featuredItems?: unknown;
+  movieTrendingItems?: unknown;
+  tvTrendingItems?: unknown;
+  popularMovieItems?: unknown;
+  popularTvItems?: unknown;
+  topMovieItems?: unknown;
+  topTvItems?: unknown;
+  movieNowPlayingItems?: unknown;
+  tvNowPlayingItems?: unknown;
+  movieUpcomingItems?: unknown;
+  tvUpcomingItems?: unknown;
+  personalization?: unknown;
+  databasePersonalizedItems?: unknown;
+};
+
 function isStatusResponse(value: unknown): value is ApiStatusResponse {
   return Boolean(value && typeof value === "object" && "results" in value);
 }
@@ -249,6 +267,21 @@ async function readMedia<T extends ApiMedia>(request: Promise<unknown>): Promise
   } catch {
     return null;
   }
+}
+
+async function readHomeBundle(): Promise<HomeBundle> {
+  try {
+    const requestHeaders = await headers();
+    const cookie = requestHeaders.get("cookie") ?? undefined;
+    return await tmdb.home(cookie) as HomeBundle;
+  } catch {
+    return {};
+  }
+}
+
+function homeItems(bundle: HomeBundle, key: keyof HomeBundle): ApiMediaListItem[] {
+  const value = bundle[key];
+  return Array.isArray(value) ? value as ApiMediaListItem[] : [];
 }
 
 function imageUrl(path: string | null | undefined, size: string): string {
@@ -534,6 +567,22 @@ function similarIds(source: Title, catalog: Title[]): string[] {
     .map((item) => item.id);
 }
 
+function hydratePersonalization(value: unknown, catalog: Title[], databaseItems: ApiMediaListItem[]): Personalization | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Partial<Personalization>;
+  if (!Array.isArray(raw.titles)) return null;
+
+  const databaseTitles = mapList(databaseItems, catalog);
+  const byId = new Map([...catalog, ...databaseTitles].map((title) => [title.id, title]));
+  return {
+    continueWatching: Array.isArray(raw.continueWatching) ? raw.continueWatching : [],
+    becauseWatched: raw.becauseWatched ?? null,
+    becauseActors: raw.becauseActors ?? null,
+    genres: Array.isArray(raw.genres) ? raw.genres : [],
+    titles: raw.titles.map((title) => byId.get(title.id) ?? title),
+  };
+}
+
 function mapMovie(movie: ApiMovie, catalog: Title[] = []): Title | null {
   const tmdbId = movie.tmdbId ?? movie.id;
   const title = movie.title;
@@ -758,32 +807,19 @@ function applyFilters(titles: Title[], options: { type?: BrowserType; genre?: st
   return result;
 }
 
-export async function getHomeData(): Promise<{ featuredTitles: Title[]; rows: Row[]; titles: Title[] }> {
-  const [
-    featuredItems,
-    movieTrendingItems,
-    tvTrendingItems,
-    popularMovieItems,
-    popularTvItems,
-    topMovieItems,
-    topTvItems,
-    movieNowPlayingItems,
-    tvNowPlayingItems,
-    movieUpcomingItems,
-    tvUpcomingItems,
-  ] = await Promise.all([
-    readList(tmdb.featured.all() as Promise<unknown>),
-    readList(tmdb.movies.trending() as Promise<unknown>),
-    readList(tmdb.tv.trending() as Promise<unknown>),
-    readList(tmdb.movies.popular() as Promise<unknown>),
-    readList(tmdb.tv.popular() as Promise<unknown>),
-    readList(tmdb.movies.topRated() as Promise<unknown>),
-    readList(tmdb.tv.topRated() as Promise<unknown>),
-    readList(tmdb.movies.nowPlaying() as Promise<unknown>),
-    readList(tmdb.tv.nowPlaying() as Promise<unknown>),
-    readList(tmdb.movies.upcoming() as Promise<unknown>),
-    readList(tmdb.tv.upcoming() as Promise<unknown>),
-  ]);
+export async function getHomeData(): Promise<{ featuredTitles: Title[]; rows: Row[]; titles: Title[]; personalization: Personalization | null }> {
+  const bundle = await readHomeBundle();
+  const featuredItems = homeItems(bundle, "featuredItems");
+  const movieTrendingItems = homeItems(bundle, "movieTrendingItems");
+  const tvTrendingItems = homeItems(bundle, "tvTrendingItems");
+  const popularMovieItems = homeItems(bundle, "popularMovieItems");
+  const popularTvItems = homeItems(bundle, "popularTvItems");
+  const topMovieItems = homeItems(bundle, "topMovieItems");
+  const topTvItems = homeItems(bundle, "topTvItems");
+  const movieNowPlayingItems = homeItems(bundle, "movieNowPlayingItems");
+  const tvNowPlayingItems = homeItems(bundle, "tvNowPlayingItems");
+  const movieUpcomingItems = homeItems(bundle, "movieUpcomingItems");
+  const tvUpcomingItems = homeItems(bundle, "tvUpcomingItems");
 
   const featured = mapList(featuredItems);
   const movieTrending = mapList(movieTrendingItems);
@@ -911,6 +947,11 @@ export async function getHomeData(): Promise<{ featuredTitles: Title[]; rows: Ro
     })),
     rows,
     titles: badgeTopTen(withSimilar),
+    personalization: hydratePersonalization(
+      bundle.personalization,
+      badgeTopTen(withSimilar),
+      homeItems(bundle, "databasePersonalizedItems"),
+    ),
   };
 }
 

@@ -5,17 +5,17 @@ import { ContentRow } from '@/components/content-row'
 import { PersonalizedRows } from '@/components/personalized-rows'
 import { getHomeData } from '@/lib/data'
 
-export const revalidate = 60
+export const dynamic = 'force-dynamic'
 
 export default async function HomePage() {
-  const { featuredTitles, rows, titles } = await getHomeData()
+  const { featuredTitles, rows, titles, personalization } = await getHomeData()
 
   return (
     <PageShell>
       <CatalogHydrator titles={titles} />
       <Hero titles={featuredTitles} />
       <div className="relative z-10 -mt-16 space-y-2 pb-16 md:-mt-24 md:max-2xl:-mt-28 md:max-2xl:space-y-0">
-        <PersonalizedRows>
+        <PersonalizedRows initialPersonalization={personalization}>
           {rows.map((row) => (
             <ContentRow key={row.id} row={row} />
           ))}

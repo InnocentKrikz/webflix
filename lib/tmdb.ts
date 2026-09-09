@@ -29,6 +29,10 @@ async function tmdbFetch<T>(
 }
 
 export const tmdb = {
+  home(cookie?: string) {
+    return tmdbFetch(`/home`, cookie ? { headers: { cookie } } : undefined);
+  },
+
   movies: {
     details(id: number) {
       return tmdbFetch(`/movies/${id}`);

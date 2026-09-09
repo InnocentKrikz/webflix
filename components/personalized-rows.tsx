@@ -5,40 +5,44 @@ import type { ReactNode } from 'react'
 import { ContentRow } from '@/components/content-row'
 import { useCatalog } from '@/components/providers'
 import { authClient } from '@/lib/auth-client'
-import type { Row, Title } from '@/lib/types'
+import type { Personalization, ProgressItem, Row, Title } from '@/lib/types'
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:3005'
 
-type ProgressItem = {
-  id: string
-  mediaType: 'MOVIE' | 'TV'
-  tmdbId: number
-  seasonNumber?: number | null
-  episodeNumber?: number | null
-  progressSeconds: number
-  durationSeconds: number
-  progressPercent: number
+function titleIdForProgress(item: ProgressItem) {
+  return `${item.mediaType === 'TV' ? 'tv' : 'movie'}-${item.tmdbId}`
 }
 
-type Personalization = {
-  continueWatching: ProgressItem[]
-  becauseWatched: { title: string; ids: { tmdbId: number; mediaType: 'MOVIE' | 'TV' }[] } | null
-  becauseActors: { actors: { id: number; name: string }[]; ids: { tmdbId: number; mediaType: 'MOVIE' | 'TV' }[] } | null
-  genres: { id: number; name: string; movieIds: number[]; tvIds: number[] }[]
+function latestProgressByTitle(progress: ProgressItem[]) {
+  const latest = new Map<string, ProgressItem>()
+  for (const item of progress) {
+    const titleId = titleIdForProgress(item)
+    if (!latest.has(titleId)) latest.set(titleId, item)
+  }
+  return [...latest.values()]
 }
 
-function idsFor(items: { tmdbId: number; mediaType: 'MOVIE' | 'TV' }[]) {
-  return items.map((item) => `${item.mediaType === 'TV' ? 'tv' : 'movie'}-${item.tmdbId}`)
+function mergeWatchProgress(titles: Title[], progress: ProgressItem[]) {
+  const progressByTitle = new Map(latestProgressByTitle(progress).map((item) => [titleIdForProgress(item), item]))
+  return titles.map((title) => {
+    const watchProgress = progressByTitle.get(title.id)
+    return watchProgress ? { ...title, watchProgress } : title
+  })
 }
 
-export function PersonalizedRows({ children }: { children?: ReactNode }) {
+export function PersonalizedRows({ children, initialPersonalization = null }: { children?: ReactNode; initialPersonalization?: Personalization | null }) {
   const { data: session, isPending } = authClient.useSession()
   const { registerTitles } = useCatalog()
-  const [personalization, setPersonalization] = useState<Personalization | null>(null)
-  const [titles, setTitles] = useState<Title[]>([])
+  const [personalization, setPersonalization] = useState<Personalization | null>(initialPersonalization)
+  const [titles, setTitles] = useState(() => mergeWatchProgress(initialPersonalization?.titles ?? [], initialPersonalization?.continueWatching ?? []))
 
   useEffect(() => {
-    if (isPending || !session) {
+    registerTitles(titles)
+  }, [registerTitles, titles])
+
+  useEffect(() => {
+    if (isPending) return
+    if (!session) {
       setPersonalization(null)
       setTitles([])
       return
@@ -52,47 +56,27 @@ export function PersonalizedRows({ children }: { children?: ReactNode }) {
         const data = (await response.json()) as Personalization
         if (cancelled) return
         setPersonalization(data)
-
-        const titleGroups = [
-          data.continueWatching.map((item) => item.id),
-          idsFor(data.becauseWatched?.ids ?? []),
-          idsFor(data.becauseActors?.ids ?? []),
-          ...data.genres.map((genre) => [
-            ...genre.movieIds.map((tmdbId) => `movie-${tmdbId}`),
-            ...genre.tvIds.map((tmdbId) => `tv-${tmdbId}`),
-          ]),
-        ].filter((ids) => ids.length > 0)
-
-        const titleResponses = await Promise.all(
-          titleGroups.map(async (ids) => {
-            const titlesResponse = await fetch(`/api/titles?ids=${encodeURIComponent(Array.from(new Set(ids)).join(','))}`)
-            return titlesResponse.ok ? (await titlesResponse.json()) as Title[] : []
-          }),
-        )
-        if (!cancelled) {
-          const uniqueTitles = new Map<string, Title>()
-          for (const group of titleResponses) {
-            for (const title of group) uniqueTitles.set(title.id, title)
-          }
-          const loadedTitles = [...uniqueTitles.values()]
-          setTitles(loadedTitles)
-          registerTitles(loadedTitles)
-        }
+        const loadedTitles = mergeWatchProgress(data.titles ?? [], data.continueWatching ?? [])
+        setTitles(loadedTitles)
+        registerTitles(loadedTitles)
       } catch {
         if (!cancelled) setPersonalization(null)
       }
     }
 
-    void load()
+    if (!initialPersonalization) void load()
+    const refresh = () => { void load() }
+    window.addEventListener('webflix:activity', refresh)
     return () => {
       cancelled = true
+      window.removeEventListener('webflix:activity', refresh)
     }
-  }, [isPending, registerTitles, session])
+  }, [initialPersonalization, isPending, registerTitles, session])
 
   const rows = useMemo<Row[]>(() => {
     if (!personalization) return []
     const byId = new Map(titles.map((title) => [title.id, title]))
-    const withProgress = personalization.continueWatching
+    const withProgress = latestProgressByTitle(personalization.continueWatching)
       .map((item) => {
         const title = byId.get(item.id)
         return title ? ({ ...title, watchProgress: item } as Title) : null
@@ -103,6 +87,8 @@ export function PersonalizedRows({ children }: { children?: ReactNode }) {
       id,
       title,
       kind: 'landscape',
+      addLogo: true,
+      addText: true,
       titles: ids.map((item) => byId.get(`${item.mediaType === 'TV' ? 'tv' : 'movie'}-${item.tmdbId}`)).filter((item): item is Title => Boolean(item)),
     })
 
@@ -121,7 +107,7 @@ export function PersonalizedRows({ children }: { children?: ReactNode }) {
     }))
 
     return [
-      withProgress.length > 0 ? { id: 'continue-watching', title: 'Continue Watching', kind: 'landscape', titles: withProgress } : null,
+      withProgress.length > 0 ? { id: 'continue-watching', title: 'Continue Watching', kind: 'landscape', addLogo: true, addText: true, titles: withProgress } : null,
       personalization.becauseWatched ? recommendationRow('because-watched', `Because you watched ${personalization.becauseWatched.title}`, personalization.becauseWatched.ids) : null,
       personalization.becauseActors ? recommendationRow('because-actors', `Because you watched ${personalization.becauseActors.actors.map((actor) => actor.name).join(' & ')}`, personalization.becauseActors.ids) : null,
       ...genreRows,

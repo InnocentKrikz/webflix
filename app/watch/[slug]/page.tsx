@@ -1,5 +1,5 @@
 import { notFound } from 'next/navigation'
-import { VideoPlayer } from '@/components/video-player'
+import { ProviderPlayer } from '@/components/viduki-player'
 import { getWatchTitle } from '@/lib/data'
 import { resolvePlayback } from '@/lib/availability'
 import { ComingSoon } from '@/components/coming-soon'
@@ -26,7 +26,7 @@ export default async function WatchPage({
   }
 
   return (
-    <VideoPlayer
+    <ProviderPlayer
       title={title}
       initialSeason={seasonNumber}
       initialEpisode={episodeNumber}

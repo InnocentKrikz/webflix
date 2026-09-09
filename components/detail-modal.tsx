@@ -3,6 +3,7 @@
 import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Select from '@radix-ui/react-select'
@@ -13,6 +14,7 @@ import {
   ChevronDown,
   Lock,
   LoaderCircle,
+  Maximize2,
   Pause,
   Play,
   Plus,
@@ -28,6 +30,15 @@ import { YouTubeTrailer, type YouTubeTrailerHandle } from '@/components/youtube-
 import { cn } from '@/lib/utils'
 import { isEpisodeReleased, isSeasonReleased, isTitleReleased } from '@/lib/availability'
 import type { Title } from '@/lib/types'
+
+function watchHref(title: Title) {
+  const progress = title.watchProgress
+  if (!progress) return `/watch/${title.slug}`
+  const params = title.type === 'tv' && progress.seasonNumber && progress.episodeNumber
+    ? `?s=${progress.seasonNumber}&e=${progress.episodeNumber}`
+    : ''
+  return `/watch/${title.slug}${params}`
+}
 
 function EpisodeRow({
   episode,
@@ -99,9 +110,10 @@ function EpisodeRow({
 }
 
 export function DetailModal() {
-  const { openId, close } = useModal()
+  const { openId, close, open } = useModal()
   const { getTitle, registerTitles } = useCatalog()
   const router = useRouter()
+  const pathname = usePathname()
   const { has, toggle } = useMyList()
   const [muted, setMuted] = useState(true)
   const [spoilerProtected, setSpoilerProtected] = useState(true)
@@ -111,13 +123,21 @@ export function DetailModal() {
   const [trailerLoaded, setTrailerLoaded] = useState(false)
   const [trailerPlaying, setTrailerPlaying] = useState(false)
   const [trailerHovered, setTrailerHovered] = useState(false)
+  const [failedTrailer, setFailedTrailer] = useState<string | null>(null)
   const trailerPlayerRef = useRef<YouTubeTrailerHandle>(null)
+  const modalScrollRef = useRef<HTMLDivElement>(null)
   const requestedDetails = useRef(new Set<string>())
 
   const catalogTitle = openId ? getTitle(openId) : undefined
-  const title = openId && detailTitle?.id === openId ? detailTitle : catalogTitle
+  const title = openId && detailTitle?.id === openId
+    ? {
+        ...detailTitle,
+        watchProgress: detailTitle.watchProgress ?? catalogTitle?.watchProgress,
+      }
+    : catalogTitle
   const isUpcoming = title ? !isTitleReleased(title) : false
   const detailsLoading = loadingId === openId
+  const isTitlePage = pathname.startsWith('/title/')
 
   useEffect(() => {
     if (!openId || requestedDetails.current.has(openId) || catalogTitle?.detailsLoaded) return
@@ -131,8 +151,11 @@ export function DetailModal() {
       .then((response) => (response.ok ? response.json() : undefined))
       .then((detail: Title | undefined) => {
         if (detail) {
-          setDetailTitle(detail)
-          registerTitles([detail])
+          const detailWithProgress = catalogTitle?.watchProgress
+            ? { ...detail, watchProgress: catalogTitle.watchProgress }
+            : detail
+          setDetailTitle(detailWithProgress)
+          registerTitles([detailWithProgress])
         } else {
           requestedDetails.current.delete(detailId)
         }
@@ -156,14 +179,22 @@ export function DetailModal() {
     () => [...(title?.trailers ?? [])].sort((a, b) => Number(b.kind === 'Trailer') - Number(a.kind === 'Trailer')),
     [title?.trailers],
   )
-  const trailer = trailers.find((item) => item.videoKey) ?? trailers[0]
+  const trailer = trailers.find((item) => item.videoKey)
+  const trailerKey = `${openId}:${trailer?.videoKey ?? ''}`
+  const hasTrailer = Boolean(trailer?.videoKey?.trim()) && failedTrailer !== trailerKey
 
   useEffect(() => {
     if (!openId) return
     setTrailerLoaded(false)
-    setTrailerPlaying(Boolean(trailer?.videoKey))
+    setTrailerPlaying(hasTrailer)
     setTrailerHovered(false)
-  }, [openId, trailer?.videoKey])
+  }, [openId, trailer?.videoKey, hasTrailer])
+
+  useEffect(() => {
+    if (!openId) return
+    setSeasonIdx(0)
+    modalScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [openId])
 
   const season = title?.seasons?.[seasonIdx] ?? title?.seasons?.[0]
 
@@ -185,6 +216,8 @@ export function DetailModal() {
     setTrailerHovered(false)
   }
 
+  if (isTitlePage) return null
+
   return (
     <Dialog.Root open={Boolean(openId)} onOpenChange={onOpenChange}>
       <AnimatePresence>
@@ -202,6 +235,7 @@ export function DetailModal() {
 
             <Dialog.Content asChild forceMount aria-describedby={undefined}>
               <motion.div
+                ref={modalScrollRef}
                 className="fixed inset-0 z-[90] overflow-y-auto py-6 md:py-12"
                 onPointerDown={(event) => {
                   if (event.target === event.currentTarget) onOpenChange(false)
@@ -231,20 +265,22 @@ export function DetailModal() {
                       alt={title.title}
                       fill
                       sizes="100vw"
-                      className={cn('object-cover transition-opacity duration-300', trailerLoaded && 'opacity-0')}
+                      className={cn('object-cover transition-opacity duration-300', hasTrailer && trailerLoaded && 'opacity-0')}
                       priority
                     />
-                    {trailer?.videoKey && (
+                    {hasTrailer && trailer?.videoKey && (
                       <YouTubeTrailer
-                        key={`${title.id}-${trailer.videoKey}`}
+                        key={trailerKey}
                         ref={trailerPlayerRef}
                         videoKey={trailer.videoKey}
                         playing={trailerPlaying}
                         muted={muted}
+                        visible={trailerLoaded}
                         onEnded={onTrailerEnded}
                         onPlaybackChange={setTrailerPlaying}
                         onMuteChange={setMuted}
                         onReadyChange={setTrailerLoaded}
+                        onError={() => setFailedTrailer(trailerKey)}
                       />
                     )}
                     <div className="absolute inset-0 bg-gradient-to-t from-card via-card/30 to-black/10" />
@@ -257,7 +293,18 @@ export function DetailModal() {
                       <X className="size-5" />
                     </Dialog.Close>
 
-                    {trailer?.videoKey && (
+                    <motion.button
+                      type="button"
+                      onClick={() => router.push(`/title/${title.slug}`)}
+                      aria-label="Open full title page"
+                      whileHover={{ scale: 1.08 }}
+                      whileTap={{ scale: 0.94 }}
+                      className="absolute left-4 top-4 z-10 grid size-9 place-items-center rounded-full bg-card/80 text-foreground transition-colors hover:bg-card"
+                    >
+                      <Maximize2 className="size-4" />
+                    </motion.button>
+
+                    {hasTrailer && (
                       <div className="absolute bottom-4 right-4 z-10 flex items-center gap-2">
                         <button
                           type="button"
@@ -313,12 +360,12 @@ export function DetailModal() {
                           <button
                             onClick={() => {
                               onOpenChange(false)
-                              router.push(`/watch/${title.slug}`)
+                              router.push(watchHref(title))
                             }}
                             className="inline-flex items-center gap-2 rounded-full bg-foreground px-6 py-2.5 text-sm font-semibold text-background transition-transform hover:scale-[1.03] active:scale-95 sm:px-7 sm:py-3 sm:text-base"
                           >
                             <Play className="size-4 fill-background sm:size-5" />
-                            Play
+                            {title.watchProgress ? 'Continue Watching' : 'Play'}
                           </button>
                         )}
                         <button
@@ -331,6 +378,24 @@ export function DetailModal() {
                         {!isUpcoming && (
                           <div>
                             <RatingButton id={title.id} large />
+                          </div>
+                        )}
+                        {title.watchProgress && (
+                          <div className="basis-full max-w-sm space-y-1 text-xs text-muted-foreground">
+                            <div className="flex items-center justify-between gap-3">
+                              <span>
+                                {title.type === 'tv' && title.watchProgress.seasonNumber && title.watchProgress.episodeNumber
+                                  ? `S${title.watchProgress.seasonNumber}:E${title.watchProgress.episodeNumber}`
+                                  : 'Continue Watching'}
+                              </span>
+                              <span>{title.watchProgress.progressPercent}% watched</span>
+                            </div>
+                            <div className="h-1.5 overflow-hidden rounded-full bg-white/20">
+                              <div
+                                className="h-full rounded-full bg-primary"
+                                style={{ width: `${Math.min(100, Math.max(0, title.watchProgress.progressPercent))}%` }}
+                              />
+                            </div>
                           </div>
                         )}
                       </motion.div>
@@ -495,8 +560,12 @@ export function DetailModal() {
                     ) : trailers.length > 0 ? (
                       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                         {trailers.map((t) => (
-                        <button
+                        <a
                           key={t.id}
+                          href={t.videoKey ? `https://www.youtube.com/watch?v=${encodeURIComponent(t.videoKey)}` : undefined}
+                          target={t.videoKey ? '_blank' : undefined}
+                          rel={t.videoKey ? 'noopener noreferrer' : undefined}
+                          aria-label={`Open ${t.title} on YouTube`}
                           className="group relative aspect-video overflow-hidden rounded-md ring-1 ring-white/10"
                         >
                           <Image src={t.thumbnail || '/placeholder.svg'} alt={t.title} fill sizes="240px" className="object-cover transition-transform duration-500 group-hover:scale-105" />
@@ -517,14 +586,14 @@ export function DetailModal() {
                           <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/80 to-transparent p-2 text-left text-xs font-medium">
                             {t.title}
                           </span>
-                        </button>
+                        </a>
                         ))}
                       </div>
                     ) : (
                       <p className="text-sm text-muted-foreground">No trailers available.</p>
                     )}
 
-                    <h3 className="mb-4 mt-8 font-heading text-lg font-bold">About {title.title}</h3>
+                    {/* <h3 className="mb-4 mt-8 font-heading text-lg font-bold">About {title.title}</h3>
                     <div className="grid gap-3 text-sm sm:grid-cols-2">
                       <p>
                         <span className="text-muted-foreground">Creator: </span>
@@ -550,7 +619,7 @@ export function DetailModal() {
                         <span className="text-muted-foreground">Status: </span>
                         {title.status}
                       </p>
-                    </div>
+                    </div> */}
                   </div>
 
                   {/* Similar */}
@@ -559,7 +628,12 @@ export function DetailModal() {
                       <h3 className="mb-4 font-heading text-lg font-bold">More Like This</h3>
                       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                         {similar.map((s) => (
-                          <LandscapeCard key={s.id} title={s} className="w-full shrink sm:w-full md:w-full" />
+                          <LandscapeCard
+                            key={s.id}
+                            title={s}
+                            onSelect={() => open(s.id)}
+                            className="w-full shrink sm:w-full md:w-full"
+                          />
                         ))}
                       </div>
                     </div>

@@ -144,7 +144,7 @@ export function Hero({ titles }: { titles: Title[] }) {
           
         </AnimatePresence>
           {/* dots */}
-      <motion.div className=" bottom-10 left-4 z-10 flex items-center gap-2 md:left-8 mt-5"
+      {/* <motion.div className=" bottom-10 left-4 z-10 flex items-center gap-2 md:left-8 mt-5"
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.6, delay: 0.3 }}
@@ -168,7 +168,7 @@ export function Hero({ titles }: { titles: Title[] }) {
             )}
           </button>
         ))}
-      </motion.div>
+      </motion.div> */}
       </div>
 
       {/* right controls: mute + maturity */}

@@ -48,13 +48,18 @@ function ShowcaseTitle({
 }
 
 function releaseLabel(title: Title): string {
-  console.log(title.releaseDate);
   if (!title.releaseDate) return "Release date TBD";
 
-  const date = new Date(`${title.releaseDate}`);
+  const day = title.releaseDate.slice(0, 10);
+  const date = new Date(`${day}T00:00:00Z`);
   if (Number.isNaN(date.getTime())) return "Release date TBD";
 
-  return `Releases on ${new Intl.DateTimeFormat(undefined, { month: "long", day: "numeric", year: "numeric" }).format(date)}`;
+  return `Releases on ${new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  }).format(date)}`;
 }
 
 const revealOnHover = {

@@ -80,6 +80,25 @@ export interface Title {
   }
 }
 
+export interface ProgressItem {
+  id: string
+  mediaType: 'MOVIE' | 'TV'
+  tmdbId: number
+  seasonNumber?: number | null
+  episodeNumber?: number | null
+  progressSeconds: number
+  durationSeconds: number
+  progressPercent: number
+}
+
+export interface Personalization {
+  continueWatching: ProgressItem[]
+  becauseWatched: { title: string; ids: { tmdbId: number; mediaType: 'MOVIE' | 'TV' }[] } | null
+  becauseActors: { actors: { id: number; name: string }[]; ids: { tmdbId: number; mediaType: 'MOVIE' | 'TV' }[] } | null
+  genres: { id: number; name: string; movieIds: number[]; tvIds: number[] }[]
+  titles: Title[]
+}
+
 export interface Row {
   id: string
   title: string

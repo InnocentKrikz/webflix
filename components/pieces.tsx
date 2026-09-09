@@ -5,7 +5,7 @@ import type { Title } from '@/lib/types'
 export function RatingStar({ rating, className }: { rating: number; className?: string }) {
   return (
     <span className={cn('inline-flex items-center gap-1', className)}>
-      <Star className="size-3.5 fill-primary text-primary" />
+      <Star className="size-3.5 fill-yellow-400 text-yellow-400" />
       <span className="font-medium text-foreground">{rating.toFixed(1)}</span>
     </span>
   )
@@ -32,24 +32,6 @@ export function QualityBadge({ value }: { value: string }) {
   return (
     <span className="inline-flex items-center rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-foreground/80">
       {value}
-    </span>
-  )
-}
-
-/** Compact maturity pill used inside hover-preview cards. */
-export function MaturityTag({ maturity }: { maturity: string }) {
-  return (
-    <span className="inline-flex items-center rounded border border-white/25 px-1 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
-      {maturity}
-    </span>
-  )
-}
-
-/** Compact quality pill used inside hover-preview cards. */
-export function QualityTag({ quality }: { quality: string }) {
-  return (
-    <span className="inline-flex items-center rounded bg-white/10 px-1 py-0.5 text-[10px] font-bold uppercase tracking-wider text-foreground/80">
-      {quality}
     </span>
   )
 }

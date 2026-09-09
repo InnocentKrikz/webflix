@@ -1,6 +1,8 @@
 'use client'
 
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
+
+const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
 type YouTubePlayer = {
   mute: () => void
@@ -18,6 +20,7 @@ type YouTubePlayerOptions = {
   events?: {
     onReady?: (event: { target: YouTubePlayer }) => void
     onStateChange?: (event: { data: number }) => void
+    onError?: (event: { data: number }) => void
   }
 }
 
@@ -74,18 +77,23 @@ export const YouTubeTrailer = forwardRef<
     onPlaybackChange: (playing: boolean) => void
     onMuteChange: (muted: boolean) => void
     onReadyChange: (ready: boolean) => void
+    onError?: () => void
+    visible?: boolean
   }
 >(function YouTubeTrailer(
-  { videoKey, playing, muted, onEnded, onPlaybackChange, onMuteChange, onReadyChange },
+  { videoKey, playing, muted, onEnded, onPlaybackChange, onMuteChange, onReadyChange, onError, visible = true },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null)
   const playerRef = useRef<YouTubePlayer | null>(null)
   const endedRef = useRef(onEnded)
+  const latestRef = useRef({ playing, muted, onPlaybackChange, onReadyChange, onError })
+  const readyRef = useRef(false)
   const [playerReady, setPlayerReady] = useState(false)
   const [isPlaying, setIsPlaying] = useState(false)
 
   endedRef.current = onEnded
+  latestRef.current = { playing, muted, onPlaybackChange, onReadyChange, onError }
 
   const updatePlayback = (nextPlaying: boolean) => {
     setIsPlaying(nextPlaying)
@@ -97,7 +105,7 @@ export const YouTubeTrailer = forwardRef<
     () => ({
       toggleMute: () => {
         const player = playerRef.current
-        if (!player || !playerReady) return
+        if (!player || !readyRef.current) return
 
         if (muted) {
           player.unMute()
@@ -109,7 +117,7 @@ export const YouTubeTrailer = forwardRef<
       },
       togglePlayback: () => {
         const player = playerRef.current
-        if (!player || !playerReady) return
+        if (!player || !readyRef.current) return
 
         if (isPlaying) {
           player.pauseVideo()
@@ -123,16 +131,26 @@ export const YouTubeTrailer = forwardRef<
     [isPlaying, muted, onMuteChange, onPlaybackChange, playerReady],
   )
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     let cancelled = false
+    const container = containerRef.current
+    if (!container) return
+    let ownedPlayer: YouTubePlayer | null = null
+    readyRef.current = false
     setPlayerReady(false)
+    setIsPlaying(false)
     onReadyChange(false)
+
+    // YouTube replaces its target. Only give it an imperative child, never
+    // a node React owns. React leaves this empty host's children alone.
+    const mount = document.createElement('div')
+    container.appendChild(mount)
 
     void loadYouTubeApi()
       .then((api) => {
-        if (cancelled || !containerRef.current) return
+        if (cancelled || !container.isConnected) return
 
-        const player = new api.Player(containerRef.current, {
+        const player = new api.Player(mount, {
           videoId: videoKey,
           width: '100%',
           height: '100%',
@@ -151,6 +169,7 @@ export const YouTubeTrailer = forwardRef<
           },
           events: {
             onReady: ({ target }) => {
+              if (cancelled || !container.isConnected) return
               const iframe = containerRef.current?.querySelector('iframe')
               if (iframe) {
                 iframe.style.width = '100%'
@@ -158,37 +177,58 @@ export const YouTubeTrailer = forwardRef<
                 iframe.style.position = 'absolute'
                 iframe.style.inset = '0'
               }
+              readyRef.current = true
               setPlayerReady(true)
-              onReadyChange(true)
-              if (playing) {
+              latestRef.current.onReadyChange(true)
+              if (latestRef.current.muted) target.mute()
+              else target.unMute()
+              if (latestRef.current.playing) {
                 target.playVideo()
-                updatePlayback(true)
               }
             },
             onStateChange: ({ data }) => {
-              if (data === 1) updatePlayback(true)
-              if (data === 2 || data === 0) updatePlayback(false)
+              if (cancelled || !readyRef.current || !container.isConnected) return
+              if (data === 1 || data === 2 || data === 0) {
+                setIsPlaying(data === 1)
+                latestRef.current.onPlaybackChange(data === 1)
+              }
               if (data === 0) endedRef.current()
+            },
+            onError: () => {
+              if (cancelled) return
+              readyRef.current = false
+              setPlayerReady(false)
+              latestRef.current.onReadyChange(false)
+              latestRef.current.onPlaybackChange(false)
+              latestRef.current.onError?.()
             },
           },
         })
 
+        ownedPlayer = player
         playerRef.current = player
       })
       .catch(() => {
-        // The thumbnail remains visible if the player API cannot load.
+        if (cancelled) return
+        latestRef.current.onReadyChange(false)
+        latestRef.current.onError?.()
       })
 
     return () => {
       cancelled = true
-      playerRef.current?.destroy()
+      readyRef.current = false
       playerRef.current = null
+      try {
+        ownedPlayer?.destroy()
+      } finally {
+        container.replaceChildren()
+      }
     }
   }, [onReadyChange, videoKey])
 
   useEffect(() => {
     const player = playerRef.current
-    if (!player || !playerReady) return
+    if (!player || !playerReady || !readyRef.current) return
 
     if (playing) {
       player.playVideo()
@@ -201,7 +241,7 @@ export const YouTubeTrailer = forwardRef<
 
   useEffect(() => {
     const player = playerRef.current
-    if (!player || !playerReady) return
+    if (!player || !playerReady || !readyRef.current) return
 
     if (muted) player.mute()
     else player.unMute()
@@ -209,12 +249,13 @@ export const YouTubeTrailer = forwardRef<
 
   return (
     <div
-      ref={containerRef}
-      className="absolute inset-0 overflow-hidden bg-black [&>iframe]:pointer-events-none [&>iframe]:absolute [&>iframe]:inset-0 [&>iframe]:block [&>iframe]:h-full [&>iframe]:w-full [&>iframe]:max-w-none [&>iframe]:border-0 [&>iframe]:origin-center [&>iframe]:scale-[1.18]"
+      className={`absolute inset-0 overflow-hidden bg-black transition-opacity duration-300 ${visible ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
       aria-hidden="true"
     >
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-16 bg-black" />
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-16 bg-black" />
+      <div
+        ref={containerRef}
+        className="absolute inset-0 [&>iframe]:pointer-events-none [&>iframe]:absolute [&>iframe]:inset-0 [&>iframe]:block [&>iframe]:h-full [&>iframe]:w-full [&>iframe]:max-w-none [&>iframe]:border-0"
+      />
     </div>
   )
 })

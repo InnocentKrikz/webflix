@@ -58,3 +58,17 @@ export function nextPlaybackTarget(title: Title, current: PlaybackTarget, now = 
   }
   return null
 }
+
+export function previousPlaybackTarget(title: Title, current: PlaybackTarget, now = Date.now()): PlaybackTarget | null {
+  const seasons = title.seasons ?? []
+  for (let seasonIndex = current.seasonIndex; seasonIndex >= 0; seasonIndex -= 1) {
+    const season = seasons[seasonIndex]
+    if (!season) continue
+    const firstEpisodeIndex = seasonIndex === current.seasonIndex ? current.episodeIndex - 1 : season.episodes.length - 1
+    for (let episodeIndex = firstEpisodeIndex; episodeIndex >= 0; episodeIndex -= 1) {
+      const episode = season.episodes[episodeIndex]
+      if (episode && isEpisodeReleased(title, season, episode, now)) return { seasonIndex, episodeIndex }
+    }
+  }
+  return null
+}

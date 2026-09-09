@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
@@ -94,6 +95,7 @@ export function Navbar() {
   }
 
   const userName = session?.user.name || 'Webflix User'
+  const userImage = session?.user.image
   const userInitial = userName.trim().charAt(0).toUpperCase() || 'W'
 
   return (
@@ -191,7 +193,6 @@ export function Navbar() {
                             key={title.id}
                             title={title}
                             artworkOnly
-                            preview={false}
                             className="w-full sm:w-full md:w-full"
                             onSelect={() => {
                               openModal(title.id)
@@ -228,9 +229,9 @@ export function Navbar() {
           <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>
               <button className="flex items-center gap-1 rounded-sm p-1 outline-none transition-colors hover:bg-white/10">
-                <span className="grid size-8 place-items-center rounded-md bg-gradient-to-br from-primary to-red-800 text-sm font-bold text-primary-foreground">
+                 {userImage ? (<Image className="rounded-md" alt={session?.user.name} width="32" height="32" src={userImage}/>) : <span className="grid size-8 place-items-center rounded-md bg-gradient-to-br from-primary to-red-800 text-sm font-bold text-primary-foreground">
                   {userInitial}
-                </span>
+                </span>}
                 <ChevronDown className="hidden size-4 text-muted-foreground sm:block" />
               </button>
             </DropdownMenu.Trigger>
@@ -241,9 +242,9 @@ export function Navbar() {
                 className="z-[60] w-56 rounded-xl border border-white/10 bg-popover/25 p-1.5 shadow-2xl backdrop-blur-xl data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
               >
                 <div className="flex items-center gap-3 px-2 py-2">
-                  <span className="grid size-9 place-items-center rounded-md bg-gradient-to-br from-primary to-red-800 font-bold text-primary-foreground">
+                 {userImage ? (<Image className="rounded-md" alt={session?.user.name} width="36" height="36" src={userImage}/>) : <span className="grid size-9 place-items-center rounded-md bg-gradient-to-br from-primary to-red-800 font-bold text-primary-foreground">
                     {userInitial}
-                  </span>
+                  </span>} 
                   <div className="leading-tight">
                     <p className="max-w-36 truncate text-sm font-semibold">{userName}</p>
                     <p className="text-xs text-muted-foreground">
@@ -259,7 +260,7 @@ export function Navbar() {
                     <Link href="/auth">Quick sign in</Link>
                   </DropdownMenu.Item>
                 )}
-                {['Manage Profiles', 'Account', 'Help Center'].map((item) => (
+                {/* {['Manage Profiles', 'Account', 'Help Center'].map((item) => (
                   <DropdownMenu.Item
                     key={item}
                     className="cursor-pointer rounded-lg px-2 py-2 text-sm outline-none transition-colors data-[highlighted]:bg-white/10"
@@ -267,7 +268,7 @@ export function Navbar() {
                     {item}
                   </DropdownMenu.Item>
                 ))}
-                <DropdownMenu.Separator className="my-1 h-px bg-white/10" />
+                <DropdownMenu.Separator className="my-1 h-px bg-white/10" /> */}
                 {session ? (
                   <DropdownMenu.Item
                     onSelect={signOut}
