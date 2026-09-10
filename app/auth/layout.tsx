@@ -1,3 +1,4 @@
+import 'react-phone-number-input/style.css'
 import type { Metadata } from 'next'
 import { sectionMetadata } from '@/lib/site-metadata'
 

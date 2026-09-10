@@ -35,6 +35,17 @@ export function isEpisodeReleased(title: Title, season: Season, episode: Episode
 
 export type PlaybackTarget = { seasonIndex: number; episodeIndex: number }
 
+export function pendingAdjacentSeason(title: Title, currentIndex: number, direction: 1 | -1, now = Date.now()): number | null {
+  const seasons = title.seasons ?? []
+  for (let index = currentIndex + direction; index >= 0 && index < seasons.length; index += direction) {
+    const season = seasons[index]
+    if (season.releaseDate && !isSeasonReleased(season, now)) continue
+    if (season.episodesLoaded === false) return season.number
+    if (season.episodes.some((episode) => isEpisodeReleased(title, season, episode, now))) return null
+  }
+  return null
+}
+
 export function resolvePlayback(title: Title, seasonNumber?: number, episodeNumber?: number, now = Date.now()): PlaybackTarget | null {
   if (!isTitleReleased(title, now)) return null
   if (title.type === 'movie') return { seasonIndex: 0, episodeIndex: 0 }
@@ -51,6 +62,7 @@ export function resolvePlayback(title: Title, seasonNumber?: number, episodeNumb
 export function nextPlaybackTarget(title: Title, current: PlaybackTarget, now = Date.now()): PlaybackTarget | null {
   for (const [seasonIndex, season] of (title.seasons ?? []).entries()) {
     if (seasonIndex < current.seasonIndex) continue
+    if (season.episodesLoaded === false && (!season.releaseDate || isSeasonReleased(season, now))) return null
     for (const [episodeIndex, episode] of season.episodes.entries()) {
       if (seasonIndex === current.seasonIndex && episodeIndex <= current.episodeIndex) continue
       if (isEpisodeReleased(title, season, episode, now)) return { seasonIndex, episodeIndex }
@@ -64,6 +76,7 @@ export function previousPlaybackTarget(title: Title, current: PlaybackTarget, no
   for (let seasonIndex = current.seasonIndex; seasonIndex >= 0; seasonIndex -= 1) {
     const season = seasons[seasonIndex]
     if (!season) continue
+    if (season.episodesLoaded === false && (!season.releaseDate || isSeasonReleased(season, now))) return null
     const firstEpisodeIndex = seasonIndex === current.seasonIndex ? current.episodeIndex - 1 : season.episodes.length - 1
     for (let episodeIndex = firstEpisodeIndex; episodeIndex >= 0; episodeIndex -= 1) {
       const episode = season.episodes[episodeIndex]

@@ -1,41 +1,35 @@
-// All catalog requests go through the backend. The backend owns caching through
-// Redis (with a memory fallback), so large catalog responses must not enter
-// Next.js's 2 MB-per-entry Data Cache.
-const TMDB_BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:3005";
+import "server-only";
+import { cache } from "react";
 
-async function tmdbFetch<T>(
-  endpoint: string,
-  options?: RequestInit
-): Promise<T> {
-  const response = await fetch(
-    `${TMDB_BASE_URL}${endpoint}`,
-    {
-      ...options,
-      cache: "no-store" as const,
-      headers: {
-        "Content-Type": "application/json",
-        ...options?.headers,
-      },
-    }
-  );
-//console.log(`${TMDB_BASE_URL}${endpoint}`)
-  if (!response.ok) {
-    throw new Error(
-      `TMDB request failed: ${response.status} ${response.statusText}`
-    );
+const TMDB_BASE_URL = (process.env.BACKEND_URL ?? process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://127.0.0.1:3005").replace(/\/$/, "");
+
+// Every call here is public catalog data. Authenticated requests use backend-proxy.
+const tmdbFetch = cache(async <T>(endpoint: string, signal?: AbortSignal): Promise<T> => {
+  const start = performance.now();
+  const response = await fetch(`${TMDB_BASE_URL}${endpoint}`, {
+    ...(signal ? { cache: "no-store" as const } : { next: { revalidate: 60 } }),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) throw new Error(`Catalog request failed: ${response.status}`);
+  const payload = await response.json();
+  if (process.env.PERF_DEBUG === "1") {
+    console.info("catalog-fetch", { path: endpoint.split("?")[0], ms: Number((performance.now() - start).toFixed(1)) });
   }
-  const payload = await response.json()
-  return (payload?.results ?? payload) as T
-}
+  return (payload?.results ?? payload) as T;
+});
 
 export const tmdb = {
-  home(cookie?: string) {
-    return tmdbFetch(`/home`, cookie ? { headers: { cookie } } : undefined);
+  home(section: "primary" | "secondary" | "all" = "all") {
+    return tmdbFetch(`/home/public?section=${section}`);
   },
+  titles(ids: string[]) { return tmdbFetch(`/catalog?ids=${encodeURIComponent(ids.join(","))}`); },
+  homeGenres() { return tmdbFetch(`/home/genres`); },
+  genreList(type = "all") { return tmdbFetch(`/genres?type=${type}`); },
+  related(type: "movie" | "tv", id: number) { return tmdbFetch(`/${type === "movie" ? "movies" : "tv"}/${id}/related`); },
 
   movies: {
-    details(id: number) {
-      return tmdbFetch(`/movies/${id}`);
+    details(id: number, view = "summary") {
+      return tmdbFetch(`/movies/${id}?view=${view}`);
     },
     popular() {
       return tmdbFetch(`/movies/popular`);
@@ -55,8 +49,8 @@ export const tmdb = {
   },
 
   tv: {
-    details(id: number) {
-      return tmdbFetch(`/tv/${id}`);
+    details(id: number, view = "summary") {
+      return tmdbFetch(`/tv/${id}?view=${view}`);
     },
     seasonDetails(id: number, seasonNumber: number) {
       return tmdbFetch(`/tv/${id}/season/${seasonNumber}`);
@@ -78,43 +72,14 @@ export const tmdb = {
     },
   },
 
-  trending: {
-    all(timeWindow = "day") {
-      return tmdbFetch(`/trending/all/${timeWindow}`);
-    },
-    movies(timeWindow = "day") {
-      return tmdbFetch(`/trending/movie/${timeWindow}`);
-    },
-    tv(timeWindow = "day") {
-      return tmdbFetch(`/trending/tv/${timeWindow}`);
-    },
-  },
-
   featured: {
     all() {
       return tmdbFetch(`/discover`);
     },
   },
 
-  searchMovie(query: string) {
-    return tmdbFetch(`/search?query=${encodeURIComponent(query)}`);
-  },
-
-  searchTV(query: string) {
-    return tmdbFetch(`/search?query=${encodeURIComponent(query)}`);
-  },
-
-  search(query: string) {
-    return tmdbFetch(`/search?query=${encodeURIComponent(query)}`);
-  },
-
-  genres: {
-    movies() {
-      return tmdbFetch(`/genre/movie/list`);
-    },
-    tv() {
-      return tmdbFetch(`/genre/tv/list`);
-    },
+  search(query: string, signal?: AbortSignal) {
+    return tmdbFetch(`/search?query=${encodeURIComponent(query)}`, signal);
   },
 
   people: {

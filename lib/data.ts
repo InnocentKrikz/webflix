@@ -1,9 +1,10 @@
 import "server-only";
 
-import { headers } from "next/headers";
+import { cache } from "react";
 import { tmdb } from "./tmdb";
-import { isTitleReleased, isSeasonReleased } from "./availability";
+import { isTitleReleased, isSeasonReleased, isEpisodeReleased } from "./availability";
 import { withFallbackDominantColors } from "./title-colors";
+import { withFallbackTrailerTimelines, selectShowcaseTrailer } from "./title-trailers";
 import type {
   CastMember,
   Episode,
@@ -364,14 +365,8 @@ async function readObject<T>(request: Promise<unknown>): Promise<T | null> {
   }
 }
 
-async function readHomeBundle(): Promise<HomeBundle> {
-  try {
-    const requestHeaders = await headers();
-    const cookie = requestHeaders.get("cookie") ?? undefined;
-    return await tmdb.home(cookie) as HomeBundle;
-  } catch {
-    return {};
-  }
+async function readHomeBundle(section: "primary" | "secondary" | "all"): Promise<HomeBundle> {
+  return await tmdb.home(section) as HomeBundle;
 }
 
 function homeItems(bundle: HomeBundle, key: keyof HomeBundle): ApiMediaListItem[] {
@@ -448,7 +443,7 @@ function maturityFromRating(value: string | null | undefined, type: MediaType): 
 
 function movieRating(movie: ApiMovie): string | undefined {
   const countries = movie.release_dates?.results ?? movie.contentRatings ?? [];
-  const preferred = countries.find((item) => item.iso_3166_1 === "US") ?? countries.find((item) => item.iso_3166_1 === "GB");
+  const preferred = countries.find((item) => (item.iso_3166_1 ?? item.countryCode) === "US") ?? countries.find((item) => (item.iso_3166_1 ?? item.countryCode) === "GB");
   const releaseRating = preferred?.release_dates?.find((date) => date.certification)?.certification;
   return releaseRating ?? preferred?.rating;
 }
@@ -534,7 +529,7 @@ function videoList(videos: ApiMovie["videos"] | ApiTvShow["videos"]): ApiVideo[]
 }
 
 function mapTrailers(videos: ApiMovie["videos"] | ApiTvShow["videos"]): Trailer[] {
-  return videoList(videos)
+  const trailers = videoList(videos)
     .filter((video) => video.key && video.site === "YouTube")
     .sort((a, b) => {
       const priority = (video: ApiVideo) => {
@@ -553,7 +548,6 @@ function mapTrailers(videos: ApiMovie["videos"] | ApiTvShow["videos"]): Trailer[
       const secondPublished = Date.parse(b.publishedAt ?? b.published_at ?? "") || 0;
       return secondPublished - firstPublished;
     })
-    .slice(0, MAX_TRAILERS)
     .map((video, index) => {
       const type = video.videoType ?? video.type ?? "Clip";
       const kind: Trailer["kind"] = type === "Trailer" ? "Trailer" : "Clip";
@@ -594,6 +588,9 @@ function mapTrailers(videos: ApiMovie["videos"] | ApiTvShow["videos"]): Trailer[
         timeline,
       };
     });
+  // Keep the normal preview limit, plus analyzed trailers that may be older
+  // than newer promos. The showcase must still be able to select their video.
+  return trailers.filter((trailer, index) => index < MAX_TRAILERS || trailer.timeline.length > 0);
 }
 
 function mapEpisodes(episodes: ApiEpisode[] = [], seasonPoster = ""): Episode[] {
@@ -626,7 +623,8 @@ function mapSeasons(seasons: ApiSeason[] = [], maturity: Maturity, fallbackPoste
         maturity,
         contentTags: episodeCount ? [`${episodeCount} Episodes`] : ["Episodes"],
         releaseDate: season.airDate ?? season.air_date ?? undefined,
-        episodesLoaded: episodes.length > 0,
+        episodeCount,
+        episodesLoaded: Array.isArray(season.episodes),
         episodes,
       };
     });
@@ -659,7 +657,10 @@ function mapKeywords(keywords: ApiKeyword[] | undefined): string[] {
 }
 
 function hasDetailedMediaData(media: ApiMedia): boolean {
-  return "cast" in media || "credits" in media || "videos" in media || "images" in media || "seasons" in media;
+  // Summary list records can contain logos, trailers, and season metadata.
+  // Cast/credits are the marker that a detail record has actually been
+  // loaded; this keeps the modal's lazy detail request working.
+  return "cast" in media || "credits" in media;
 }
 
 function addBadge(badges: TitleBadge[], badge: TitleBadge) {
@@ -681,10 +682,11 @@ function applyTopTenBadges(titles: Title[], topTenIds: Set<string>): Title[] {
   return titles.map((title) => (topTenIds.has(title.id) ? withBadge(title, "Top 10") : title));
 }
 
-async function topTenIds(): Promise<Set<string>> {
-  const featured = mapList(await readList(tmdb.featured.all()));
+const topTenIds = cache(async (): Promise<Set<string>> => {
+  const bundle = await readObject<HomeBundle>(tmdb.home("primary"));
+  const featured = bundle ? mapList(homeItems(bundle, "featuredItems")) : [];
   return new Set(uniqueTitles([featured]).slice(0, 10).map((title) => title.id));
-}
+});
 
 function badgesForMovie(releaseDate: string | null | undefined): TitleBadge[] {
   const badges: TitleBadge[] = [];
@@ -898,7 +900,9 @@ function uniqueTitles(groups: Title[][]): Title[] {
     for (const title of group) {
       const existingIndex = indexById.get(title.id);
       if (existingIndex !== undefined) {
-        titles[existingIndex] = withFallbackDominantColors(titles[existingIndex]!, title);
+        titles[existingIndex] = withFallbackTrailerTimelines(
+          withFallbackDominantColors(titles[existingIndex]!, title), title,
+        );
         continue;
       }
       indexById.set(title.id, titles.length);
@@ -933,12 +937,12 @@ async function catalog(): Promise<Title[]> {
 async function titleGroupsFor(type: BrowserType, sort: SortOption): Promise<ApiMediaListItem[][]> {
   if (type === "movie") {
     const primary = sort === "rating" ? tmdb.movies.topRated() : sort === "year" ? tmdb.movies.upcoming() : tmdb.movies.trending();
-    return [await readList(primary as Promise<unknown>), await readList(tmdb.movies.popular() as Promise<unknown>)];
+    return Promise.all([readList(primary), readList(tmdb.movies.popular())]);
   }
 
   if (type === "tv") {
     const primary = sort === "rating" ? tmdb.tv.topRated() : sort === "year" ? tmdb.tv.nowPlaying() : tmdb.tv.trending();
-    return [await readList(primary as Promise<unknown>), await readList(tmdb.tv.popular() as Promise<unknown>)];
+    return Promise.all([readList(primary), readList(tmdb.tv.popular())]);
   }
 
   const [moviePrimary, tvPrimary, featured] = await Promise.all([
@@ -1003,8 +1007,11 @@ function applyFilters(titles: Title[], options: { type?: BrowserType; genre?: st
   return result;
 }
 
-export async function getHomeData(): Promise<{ featuredTitles: Title[]; rows: Row[]; titles: Title[]; personalization: Personalization | null; trendingGenreRecommendations: Personalization | null; productionCompanies: ProductionCompanySummary[] }> {
-  const bundle = await readHomeBundle();
+export async function getHomeData(section: "primary" | "secondary" | "all" = "all"): Promise<{ featuredTitles: Title[]; rows: Row[]; titles: Title[]; personalization: Personalization | null; trendingGenreRecommendations: Personalization | null; productionCompanies: ProductionCompanySummary[] }> {
+  const [bundle, secondaryTopTenIds] = await Promise.all([
+    readHomeBundle(section),
+    section === "secondary" ? topTenIds() : null,
+  ]);
   const featuredItems = homeItems(bundle, "featuredItems");
   const movieTrendingItems = homeItems(bundle, "movieTrendingItems");
   const tvTrendingItems = homeItems(bundle, "tvTrendingItems");
@@ -1040,7 +1047,7 @@ export async function getHomeData(): Promise<{ featuredTitles: Title[]; rows: Ro
   const hydrate = (items: Title[]) => items.map((title) => byId.get(title.id)).filter((title): title is Title => Boolean(title));
 
   const top10Titles = hydrate(uniqueTitles([featured])).slice(0, 10).map((title) => withBadge(title, "Top 10"));
-  const top10Ids = new Set(top10Titles.map((title) => title.id));
+  const top10Ids = secondaryTopTenIds ?? new Set(top10Titles.map((title) => title.id));
   const badgeTopTen = (items: Title[]) => applyTopTenBadges(items, top10Ids);
 
   const trendingMovies = badgeTopTen(hydrate(movieTrending).slice(0, MAX_ROW_TITLES));
@@ -1051,7 +1058,9 @@ export async function getHomeData(): Promise<{ featuredTitles: Title[]; rows: Ro
   const nowPlayingTvTitles = badgeTopTen(hydrate(nowPlayingTv).slice(0, MAX_ROW_TITLES));
   const showcaseTitles = upcomingTitles
     .map((title) => byId.get(title.id))
-    .filter((title): title is Title => Boolean(title?.trailers.length))
+    .filter((title): title is Title => {
+      return Boolean(title && selectShowcaseTrailer(title.trailers));
+    })
     .slice(0, MAX_SHOWCASE_TITLES);
 
   const rows: Row[] = [
@@ -1141,6 +1150,9 @@ export async function getHomeData(): Promise<{ featuredTitles: Title[]; rows: Ro
     [],
     homeItems(bundle, "databaseTrendingGenreItems"),
   );
+  if (trendingGenreRecommendations) {
+    trendingGenreRecommendations.titles = badgeTopTen(trendingGenreRecommendations.titles);
+  }
   const allTitles = uniqueTitles([badgeTopTen(withSimilar), trendingGenreRecommendations?.titles ?? []]);
 
   return {
@@ -1162,6 +1174,7 @@ export async function getHomeData(): Promise<{ featuredTitles: Title[]; rows: Ro
 
 export async function getTitles(options: {
   ids?: string[];
+  signal?: AbortSignal;
   query?: string;
   genre?: string;
   sort?: SortOption;
@@ -1169,8 +1182,7 @@ export async function getTitles(options: {
 } = {}): Promise<Title[]> {
   const topTen = topTenIds();
   if (options.ids?.length) {
-    const fullCatalog = await catalog();
-    const titles = await Promise.all(options.ids.map((id) => titleFromId(id, fullCatalog)));
+    const titles = mapList(await readList(tmdb.titles(options.ids.slice(0, MAX_GRID_TITLES))));
     const filteredTitles = applyFilters(titles.filter((title): title is Title => Boolean(title)), {
       ...options,
       sort: undefined,
@@ -1180,7 +1192,7 @@ export async function getTitles(options: {
   }
 
   if (options.query) {
-    const searchItems = await readList(tmdb.search(options.query) as Promise<unknown>);
+    const searchItems = await readList(tmdb.search(options.query, options.signal) as Promise<unknown>);
     const searchTitles = mapList(searchItems);
     const withSimilar = searchTitles.map((title) => ({
       ...title,
@@ -1198,43 +1210,41 @@ export async function getTitles(options: {
   return applyTopTenBadges(applyFilters(withSimilar, { ...options, sort }), await topTen).slice(0, MAX_GRID_TITLES);
 }
 
-export async function getTitle(id: string): Promise<Title | undefined> {
+export const getTitle = cache(async (id: string, view = "summary"): Promise<Title | undefined> => {
   // Detail endpoints resolve database records before falling back to TMDB. Do
   // this first so a modal/watch page is not blocked on rebuilding the catalog
   // from multiple list endpoints.
-  const detail = await titleFromId(id, []);
+  const detail = await titleFromId(id, [], view);
   if (detail) return detail;
 
   const [titles, topTen] = await Promise.all([catalog(), topTenIds()]);
   const title = titles.find((item) => item.id === id);
   return title ? applyTopTenBadges([title], topTen)[0] : undefined;
-}
+});
 
-export async function getWatchTitle(slug: string, seasonNumber?: number): Promise<Title | undefined> {
+export const getWatchTitle = cache(async (slug: string, seasonNumber?: number): Promise<Title | undefined> => {
   const title = await getBySlug(slug);
   if (!title || title.type !== 'tv' || !isTitleReleased(title)) return title;
-  const season = seasonNumber !== undefined
-    ? title.seasons?.find((item) => item.number === seasonNumber)
-    : title.seasons?.find((item) => isSeasonReleased(item));
-  if (!season || season.episodesLoaded) return title;
-  try {
-    const raw = unwrapResults<ApiSeason>(await tmdb.tv.seasonDetails(Number(title.id.split('-')[1]), season.number));
-    const loaded = mapSeasons([{ ...raw, seasonNumber: season.number }], title.maturity, title.backdrop)[0];
-    if (loaded) return { ...title, seasons: title.seasons?.map((item) => item.number === season.number ? loaded : item) };
-  } catch {
-    // Keep unavailable episodes blocked when their release metadata cannot be loaded.
+  const candidates = title.seasons?.filter((season) => seasonNumber !== undefined
+    ? season.number === seasonNumber : !season.releaseDate || isSeasonReleased(season)) ?? [];
+  for (const season of candidates) {
+    if (season.episodesLoaded) return title;
+    const loaded = await getSeason(title.id, season.number);
+    if (!loaded) continue;
+    const updated = { ...title, seasons: title.seasons?.map((item) => item.number === season.number ? { ...loaded, maturity: title.maturity } : item) };
+    if (seasonNumber !== undefined || loaded.episodes.some((episode) => isEpisodeReleased(updated, loaded, episode))) return updated;
   }
   return title;
-}
+});
 
-async function titleFromId(id: string, fullCatalog: Title[]): Promise<Title | undefined> {
+async function titleFromId(id: string, fullCatalog: Title[], view = "summary"): Promise<Title | undefined> {
   const [type, rawTmdbId] = id.split("-");
   const tmdbId = Number(rawTmdbId);
   if ((type !== "movie" && type !== "tv") || !Number.isFinite(tmdbId)) return undefined;
 
   const media = type === "movie"
-    ? await readMedia<ApiMovie>(tmdb.movies.details(tmdbId) as Promise<unknown>)
-    : await readMedia<ApiTvShow>(tmdb.tv.details(tmdbId) as Promise<unknown>);
+    ? await readMedia<ApiMovie>(tmdb.movies.details(tmdbId, view) as Promise<unknown>)
+    : await readMedia<ApiTvShow>(tmdb.tv.details(tmdbId, view) as Promise<unknown>);
 
   const mapped = media && (type === "movie" ? mapMovie(media as ApiMovie, fullCatalog) : mapTvShow(media as ApiTvShow, fullCatalog));
   if (mapped) return mapped;
@@ -1242,9 +1252,9 @@ async function titleFromId(id: string, fullCatalog: Title[]): Promise<Title | un
   return fullCatalog.find((title) => title.id === id);
 }
 
-export async function getBySlug(slug: string): Promise<Title | undefined> {
+export async function getBySlug(slug: string, view = "summary"): Promise<Title | undefined> {
   const match = slug.match(/-(movie|tv)-(\d+)$/);
-  if (match) return getTitle(`${match[1]}-${match[2]}`);
+  if (match) return getTitle(`${match[1]}-${match[2]}`, view);
 
   const titles = await catalog();
   return titles.find((title) => title.slug === slug);
@@ -1334,27 +1344,44 @@ function mapProductionCompanyPage(raw: ApiCompanyPage): ProductionCompanyPage | 
   };
 }
 
-export async function getPerson(id: number): Promise<PersonPage | undefined> {
+export const getPerson = cache(async (id: number): Promise<PersonPage | undefined> => {
   if (!Number.isInteger(id) || id <= 0) return undefined;
   const raw = await readObject<ApiPersonPage>(tmdb.people.details(id) as Promise<unknown>);
   const person = raw ? mapPersonPage(raw) : null;
   return person ?? undefined;
-}
+});
 
-export async function getProductionCompany(id: number): Promise<ProductionCompanyPage | undefined> {
+export const getProductionCompany = cache(async (id: number): Promise<ProductionCompanyPage | undefined> => {
   if (!Number.isInteger(id) || id <= 0) return undefined;
   const raw = await readObject<ApiCompanyPage>(tmdb.productionCompanies.details(id) as Promise<unknown>);
   const company = raw ? mapProductionCompanyPage(raw) : null;
   return company ?? undefined;
+});
+
+export const getGenres = cache(async (type: BrowserType = "all"): Promise<string[]> => {
+  const genres = await readList(tmdb.genreList(type)) as ApiGenre[];
+  return ["All", ...genres.map((genre) => genre.name).filter((name): name is string => Boolean(name))];
+});
+
+export async function getHomeGenreData(): Promise<Personalization | null> {
+  const [bundle, topTen] = await Promise.all([
+    readObject<HomeBundle>(tmdb.homeGenres()),
+    topTenIds(),
+  ]);
+  const recommendations = bundle ? hydratePersonalization(bundle.trendingGenreRecommendations, [], homeItems(bundle, "databaseTrendingGenreItems")) : null;
+  return recommendations ? { ...recommendations, titles: applyTopTenBadges(recommendations.titles, topTen) } : null;
 }
 
-export async function getGenres(type: BrowserType = "all"): Promise<string[]> {
-  const titles = await getTitles({ type, sort: "trending" });
-  const genres = new Set<string>(["All"]);
+export async function getRelatedTitles(id: string): Promise<Title[]> {
+  const match = /^(movie|tv)-(\d+)$/.exec(id);
+  if (!match) return [];
+  const raw = await readObject<{ similar: ApiMediaListItem[]; recommendations: ApiMediaListItem[] }>(tmdb.related(match[1] as MediaType, Number(match[2])));
+  return raw ? uniqueTitles([mapList(raw.recommendations ?? []), mapList(raw.similar ?? [])]).slice(0, 14) : [];
+}
 
-  for (const title of titles) {
-    for (const genre of title.genres) genres.add(genre);
-  }
-
-  return [...genres];
+export async function getSeason(id: string, number: number): Promise<Season | undefined> {
+  const match = /^tv-(\d+)$/.exec(id);
+  if (!match) return undefined;
+  const raw = await readObject<ApiSeason>(tmdb.tv.seasonDetails(Number(match[1]), number));
+  return raw ? mapSeasons([{ ...raw, seasonNumber: number }], "TV-14")[0] : undefined;
 }

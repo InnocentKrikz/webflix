@@ -1,9 +1,11 @@
 import type { Metadata } from 'next'
 import { PageShell } from '@/components/page-shell'
-import { TitleBrowser } from '@/components/title-browser'
+import { BrowserContent } from '@/components/browser-content'
+import { Suspense } from 'react'
+import { TitleBrowserSkeleton } from '@/components/media-skeletons'
 import { sectionMetadata } from '@/lib/site-metadata'
 
-export const dynamic = 'force-dynamic'
+export const revalidate = 60
 export const metadata: Metadata = sectionMetadata(
   'Movies',
   'Browse movies on Sceneflix, from popular releases and top-rated films to upcoming titles.',
@@ -12,11 +14,13 @@ export const metadata: Metadata = sectionMetadata(
 export default function MoviesPage() {
   return (
     <PageShell>
-      <TitleBrowser
+      <Suspense fallback={<TitleBrowserSkeleton heading="Movies" />}>
+      <BrowserContent
         heading="Movies"
         fixedType="movie"
         emptyLabel="No movies match this genre yet. Try a different one."
       />
+      </Suspense>
     </PageShell>
   )
 }

@@ -25,6 +25,8 @@ function forwardedHeaders(request: Request) {
   const requestUrl = new URL(request.url)
 
   HOP_BY_HOP_HEADERS.forEach((header) => headers.delete(header))
+  // Node fetch decodes compression; request identity encoding across the local hop.
+  headers.set('accept-encoding', 'identity')
   headers.set('x-forwarded-host', requestUrl.host)
   headers.set('x-forwarded-proto', requestUrl.protocol.slice(0, -1))
 
@@ -38,6 +40,9 @@ function responseHeaders(response: Response) {
   }
   const cookies = upstreamHeaders.getSetCookie?.() ?? splitSetCookieHeader(response.headers.get('set-cookie') ?? '')
 
+  headers.delete('content-encoding')
+  headers.delete('content-length')
+  headers.delete('transfer-encoding')
   headers.delete('set-cookie')
   cookies.forEach((cookie) => headers.append('set-cookie', cookie))
   return headers

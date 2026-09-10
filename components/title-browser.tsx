@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { fetchCatalog } from '@/lib/catalog-client'
 import { motion } from 'framer-motion'
 import { CatalogHydrator } from '@/components/catalog-hydrator'
 import { BrowseGrid } from '@/components/browse-grid'
@@ -15,37 +16,29 @@ export function TitleBrowser({
   fixedType,
   initialGenre = 'All',
   emptyLabel,
+  initialTitles,
+  initialGenres,
 }: {
   heading: string
   fixedType?: MediaType
   initialGenre?: string
   emptyLabel: string
+  initialTitles: Title[]
+  initialGenres: string[]
 }) {
   const [type, setType] = useState<BrowserType>(fixedType ?? 'all')
   const [genre, setGenre] = useState(initialGenre)
   const [sort, setSort] = useState<SortOption>('trending')
-  const [genres, setGenres] = useState<string[]>([])
-  const [titles, setTitles] = useState<Title[]>([])
-  const [loading, setLoading] = useState(true)
+  const genres = initialGenres
+  const [titles, setTitles] = useState(initialTitles)
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    const controller = new AbortController()
-    const params = new URLSearchParams()
-    if (fixedType) params.set('type', fixedType)
-
-    fetch(`/api/genres?${params.toString()}`, { signal: controller.signal })
-      .then((response) => (response.ok ? response.json() : []))
-      .then((nextGenres: string[]) => {
-        if (!controller.signal.aborted) setGenres(nextGenres)
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setGenres([])
-      })
-
-    return () => controller.abort()
-  }, [fixedType])
-
-  useEffect(() => {
+    if (type === (fixedType ?? 'all') && genre === initialGenre && sort === 'trending') {
+      setTitles(initialTitles)
+      setLoading(false)
+      return
+    }
     const controller = new AbortController()
     const params = new URLSearchParams()
     params.set('type', fixedType ?? type)
@@ -53,8 +46,7 @@ export function TitleBrowser({
     if (genre !== 'All') params.set('genre', genre)
 
     setLoading(true)
-    fetch(`/api/titles?${params.toString()}`, { signal: controller.signal })
-      .then((response) => (response.ok ? response.json() : []))
+    fetchCatalog<Title[]>(`/api/titles?${params.toString()}`, controller.signal)
       .then((nextTitles: Title[]) => {
         if (!controller.signal.aborted) setTitles(nextTitles)
       })
@@ -66,13 +58,13 @@ export function TitleBrowser({
       })
 
     return () => controller.abort()
-  }, [fixedType, genre, sort, type])
+  }, [fixedType, genre, sort, type, initialGenre, initialTitles])
 
   return (
     <div className="mx-auto max-w-[1600px] px-4 pb-20 pt-28 md:px-12 md:pt-32">
       <CatalogHydrator titles={titles} />
       <motion.h1
-        initial={{ opacity: 0, y: 12 }}
+        initial={false}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4 }}
         className="mb-6 font-display text-3xl font-extrabold tracking-tight md:text-4xl"
@@ -88,11 +80,13 @@ export function TitleBrowser({
         <GenreChips genres={genres} active={genre} onChange={setGenre} />
       </div>
 
-      {loading ? (
+      <div aria-busy={loading}>
+      {loading && titles.length === 0 ? (
         <BrowseGridSkeleton />
       ) : (
         <BrowseGrid titles={titles} emptyLabel={emptyLabel} />
       )}
+      </div>
     </div>
   )
 }

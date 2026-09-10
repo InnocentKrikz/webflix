@@ -44,6 +44,7 @@ export interface Season {
   name: string
   maturity: Maturity
   contentTags: string[]
+  episodeCount?: number
   episodes: Episode[]
   releaseDate?: string
   episodesLoaded?: boolean

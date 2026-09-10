@@ -4,7 +4,6 @@ import { Inter, Sora } from 'next/font/google'
 import { Providers } from '@/components/providers'
 import { SITE_DESCRIPTION, SITE_NAME, SITE_SOCIAL_IMAGE } from '@/lib/site-metadata'
 import './globals.css'
-import 'react-phone-number-input/style.css'
 
 const inter = Inter({
   subsets: ['latin'],
@@ -86,6 +85,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={`dark ${inter.variable} ${sora.variable}`} suppressHydrationWarning>
       <head>
+        <link rel="preconnect" href="https://image.tmdb.org" />
         <script dangerouslySetInnerHTML={{ __html: effectsPreferenceScript }} />
       </head>
       <body className="bg-background text-foreground antialiased">

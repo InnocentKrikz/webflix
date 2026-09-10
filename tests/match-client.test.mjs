@@ -89,9 +89,9 @@ test('logout and account switches discard previous sessions and late responses',
   resolveFirst(response({ 'movie-1': result(98, 'LIKE') }))
   await delay(10)
   assert.equal(second.get('movie-1').match.score, 71)
-  assert.equal(guest.get('movie-1').match, null)
-  assert.equal(calls, 2)
-  assert.equal(await guest.rate('movie-1', 'LIKE'), false)
+  assert.equal(guest.get('movie-1').match.score, 71)
+  assert.equal(calls, 3)
+  assert.equal(await guest.rate('movie-1', 'LIKE'), true)
 })
 
 test('quick remounts and development effect restarts do not strand loading scores', async (t) => {

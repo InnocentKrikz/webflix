@@ -35,13 +35,13 @@ export const PLAYER_PROVIDERS = [
     origin: VIDUKI_ORIGIN,
     api: 4,
   },
-  {
-    id: 'vidsrc-sbs',
-    label: 'VidSrc · SBS',
-    description: 'Movie and TV embed',
-    kind: 'vidsrc',
-    origin: 'https://vidsrc.sbs',
-  },
+  // {
+  //   id: 'vidsrc-sbs',
+  //   label: 'VidSrc · SBS',
+  //   description: 'Movie and TV embed',
+  //   kind: 'vidsrc',
+  //   origin: 'https://vidsrc.sbs',
+  // },
   {
     id: 'vidsrcme-ru',
     label: 'VidSrc · ME',
@@ -88,6 +88,6 @@ export function buildProviderUrl(
     : `embed/${kind}/${tmdbId}`
 
   const query = new URLSearchParams({ autoplay: '1', color: 'e50914' })
-  if (startAt > 0) query.set(provider.id === 'vidsrc-sbs' ? 't' : 'startAt', String(Math.floor(startAt)))
+  if (startAt > 0) query.set('startAt', String(Math.floor(startAt)))
   return `${provider.origin}/${path}?${query.toString()}`
 }

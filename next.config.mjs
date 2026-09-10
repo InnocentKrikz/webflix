@@ -1,6 +1,5 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-   allowedDevOrigins: ['127.0.0.1'],
   async headers() {
     return [
       {
@@ -14,12 +13,12 @@ const nextConfig = {
       },
     ]
   },
-  typescript: {
-    ignoreBuildErrors: true,
-  },
-  allowedDevOrigins: ["be88-34-122-40-36.ngrok-free.app"],
+  allowedDevOrigins: ["127.0.0.1", "be88-34-122-40-36.ngrok-free.app"],
   images: {
-    unoptimized: true,
+    loader: 'custom',
+    loaderFile: './lib/tmdb-image-loader.ts',
+    deviceSizes: [360, 640, 780, 1080, 1280, 1920],
+    imageSizes: [48, 92, 154, 185, 300, 342, 500],
     remotePatterns: [
       {
         protocol: 'https',

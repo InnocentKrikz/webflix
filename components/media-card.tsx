@@ -1,13 +1,16 @@
 'use client'
 
 import Image from 'next/image'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { Star } from 'lucide-react'
+import { useTitlePrefetch } from '@/lib/use-title-prefetch'
 import { useModal } from '@/components/providers'
 import { CardActions } from '@/components/card-actions'
 import { MatchScore } from '@/components/match-score'
 import { MediaCardGlow } from '@/components/media-card-glow'
+import { useTopTenBadge } from '@/components/top-ten-provider'
 import { cn } from '@/lib/utils'
 import { isTitleReleased } from '@/lib/availability'
 import type { Title } from '@/lib/types'
@@ -16,24 +19,20 @@ function titleBadges(title: Title) {
   return title.badges?.length ? title.badges : title.badge ? [title.badge] : []
 }
 
-function TopBadges({ title }: { title: Title }) {
-  const badges = titleBadges(title).filter((badge) => badge === 'Top 10')
-  if (badges.length === 0) return null
+function TopBadges({ badgeTop10 }: { badgeTop10: boolean }) {
+  if (!badgeTop10) return null
 
   return (
     <div className="absolute left-0 top-10 z-10 flex max-w-[82%] flex-col items-start gap-1 transition-opacity duration-200 group-hover:opacity-0">
-      {badges.map((badge) => (
-        <span
-          key={badge}
-          aria-label="Top 10"
-          className="rounded-r bg-primary px-1.5 py-0.5 text-[10px] font-bold uppercase leading-none tracking-wide text-primary-foreground"
-        >
-          <span className="flex flex-col items-center leading-none">
-            <span className="text-[8px]">TOP</span>
-            <span>10</span>
-          </span>
+      <span
+        aria-label="Top 10"
+        className="rounded-r bg-primary px-1.5 py-0.5 text-[10px] font-bold uppercase leading-none tracking-wide text-primary-foreground"
+      >
+        <span className="flex flex-col items-center leading-none">
+          <span className="text-[8px]">TOP</span>
+          <span>10</span>
         </span>
-      ))}
+      </span>
     </div>
   )
 }
@@ -91,13 +90,16 @@ function watchHref(title: Title) {
 /**
  * Signature card: shows a portrait poster with optional title and rating details.
  */
-export function PortraitCard({ title, className, addLogo = false, addText = true, artworkOnly = false, onSelect }: { title: Title; className?: string; addLogo?: boolean; addText?: boolean; artworkOnly?: boolean; onSelect?: () => void }) {
+export function PortraitCard({ title, className, addLogo = false, addText = true, badgeTop10, artworkOnly = false, onSelect }: { title: Title; className?: string; addLogo?: boolean; addText?: boolean; badgeTop10?: boolean; artworkOnly?: boolean; onSelect?: () => void }) {
   const { open } = useModal()
+  const isTopTen = useTopTenBadge(title)
+  const prefetch = useTitlePrefetch(title.id)
   const comingSoon = !isTitleReleased(title)
   const select = () => onSelect ? onSelect() : open(title.id)
 
   return (
     <motion.div
+      {...prefetch}
       className={cn('group relative isolate w-[150px] shrink-0 sm:w-[170px] md:w-[185px] md:max-lg:w-[165px]', className)}
     >
       <MediaCardGlow colors={[title.dominantColor1, title.dominantColor2, title.dominantColor3]} />
@@ -107,9 +109,10 @@ export function PortraitCard({ title, className, addLogo = false, addText = true
         onClick={select}
         className="relative z-10 block aspect-[2/3] w-full overflow-hidden rounded-md ring-1 ring-white/5"
         aria-label={title.title}
+        data-title-id={title.id}
       >
         <RatingBadge title={title} />
-        <TopBadges title={title} />
+        <TopBadges badgeTop10={badgeTop10 ?? isTopTen} />
         <SideBadges title={title} />
         <Image
           src={title.poster || '/placeholder.svg'}
@@ -130,14 +133,20 @@ export function PortraitCard({ title, className, addLogo = false, addText = true
 }
 
 /** Landscape card that on hover reveals overlay actions (used in most rows). */
-export function LandscapeCard({ title, className, addLogo = false, addText = true, onSelect }: { title: Title; className?: string; addLogo?: boolean; addText?: boolean; onSelect?: () => void }) {
+export function LandscapeCard({ title, className, addLogo = false, addText = true, badgeTop10, onSelect }: { title: Title; className?: string; addLogo?: boolean; addText?: boolean; badgeTop10?: boolean; onSelect?: () => void }) {
   const { open } = useModal()
+  const isTopTen = useTopTenBadge(title)
+  const prefetch = useTitlePrefetch(title.id)
+  const [showActions, setShowActions] = useState(false)
   const router = useRouter()
   const progress = title.watchProgress
   const select = () => onSelect ? onSelect() : progress && isTitleReleased(title) ? router.push(watchHref(title)) : open(title.id)
 
   return (
     <motion.div
+      {...prefetch}
+      onPointerEnter={() => { setShowActions(true); prefetch.onPointerEnter() }}
+      onFocus={() => { setShowActions(true); prefetch.onFocus() }}
       className={cn('group relative isolate w-[230px] shrink-0 sm:w-[260px] md:w-[300px] md:max-lg:w-[270px]', className)}
       whileHover={{ scale: 1.06, zIndex: 30 }}
       transition={{ type: 'spring', stiffness: 300, damping: 24 }}
@@ -155,9 +164,10 @@ export function LandscapeCard({ title, className, addLogo = false, addText = tru
         }}
         className="relative z-10 block aspect-video w-full cursor-pointer overflow-hidden rounded-md ring-1 ring-white/5"
         aria-label={title.title}
+        data-title-id={title.id}
       >
         <RatingBadge title={title} />
-        <TopBadges title={title} />
+        <TopBadges badgeTop10={badgeTop10 ?? isTopTen} />
         <SideBadges title={title} />
         <Image
           src={title.backdrop || '/placeholder.svg'}
@@ -187,11 +197,13 @@ export function LandscapeCard({ title, className, addLogo = false, addText = tru
             <span>•</span>
             <span>{title.type === 'tv' ? 'TV Show' : 'Movie'}</span>
           </div>
-          <div className="max-h-0 overflow-hidden opacity-0 transition-all duration-300 group-hover:max-h-16 group-hover:opacity-100">
+          <div className="max-h-0 overflow-hidden opacity-0 transition-all duration-300 group-hover:max-h-16 group-hover:opacity-100 group-focus-within:max-h-16 group-focus-within:opacity-100">
+            {showActions && <>
             <div className="text-[11px]"><MatchScore id={title.id} /></div>
             <div className="pt-1">
               <CardActions title={title} compact />
             </div>
+            </>}
           </div>
         </div>
       </div>
@@ -200,16 +212,20 @@ export function LandscapeCard({ title, className, addLogo = false, addText = tru
 }
 
 /** Big numbered Top-10 card (giant outlined rank digit behind a poster). */
-export function RankedCard({ title, rank, addLogo = false, addText = true }: { title: Title; rank: number; addLogo?: boolean; addText?: boolean }) {
+export function RankedCard({ title, rank, addLogo = false, addText = true, badgeTop10 }: { title: Title; rank: number; addLogo?: boolean; addText?: boolean; badgeTop10?: boolean }) {
   const { open } = useModal()
+  const isTopTen = useTopTenBadge(title)
+  const prefetch = useTitlePrefetch(title.id)
 
   return (
     <motion.button
+      {...prefetch}
       onClick={() => open(title.id)}
       className="group relative isolate flex h-[210px] w-[290px] shrink-0 items-end sm:h-[240px] sm:w-[320px]"
       whileHover={{ scale: 1.04, zIndex: 30 }}
       transition={{ type: 'spring', stiffness: 300, damping: 24 }}
       aria-label={`${title.title}, ranked number ${rank}`}
+      data-title-id={title.id}
     >
       <MediaCardGlow colors={[title.dominantColor1, title.dominantColor2, title.dominantColor3]} />
       <span
@@ -220,7 +236,7 @@ export function RankedCard({ title, rank, addLogo = false, addText = true }: { t
       </span>
       <div className="relative z-10 -ml-6 aspect-[2/3] h-full overflow-hidden rounded-md ring-1 ring-white/10">
         <RatingBadge title={title} />
-        <TopBadges title={title} />
+        <TopBadges badgeTop10={badgeTop10 ?? isTopTen} />
         <SideBadges title={title} />
         <Image
           src={title.poster || '/placeholder.svg'}

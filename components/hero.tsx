@@ -38,7 +38,7 @@ export function Hero({ titles }: { titles: Title[] }) {
 
   return (
     <section className="relative h-[82vh] min-h-[560px] w-full overflow-hidden">
-      <AnimatePresence mode="popLayout">
+      <AnimatePresence initial={false} mode="popLayout">
         <motion.div
           key={title.id}
           className="absolute inset-0"
@@ -64,7 +64,7 @@ export function Hero({ titles }: { titles: Title[] }) {
 
       {/* content */}
       <div className="relative z-10 mx-auto flex h-full max-w-[1600px] flex-col justify-end px-4 pb-24 md:px-8 md:pb-28">
-        <AnimatePresence mode="wait">
+        <AnimatePresence initial={false} mode="wait">
           <motion.div
             key={title.id}
             initial={{ opacity: 0, y: 28 }}

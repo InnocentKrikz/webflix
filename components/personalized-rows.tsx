@@ -52,7 +52,8 @@ export function PersonalizedRows({
   useEffect(() => {
     if (isPending) return
     let cancelled = false
-    const load = async () => {
+    let inFlight: Promise<void> | null = null
+    const loadOnce = async () => {
       try {
         await ensureViewerIdentity()
         const response = await fetch(`${BACKEND_URL}/progress`, { credentials: 'include' })
@@ -68,6 +69,10 @@ export function PersonalizedRows({
       }
     }
 
+    const load = () => {
+      if (!inFlight) inFlight = loadOnce().finally(() => { inFlight = null })
+      return inFlight
+    }
     void load()
     const refresh = () => { void load() }
     window.addEventListener('sceneflix:activity', refresh)
@@ -104,11 +109,29 @@ export function PersonalizedRows({
     ].filter((row) => row !== null && row.titles.length > 0) as Row[]
   }, [personalization, titles])
 
-  const genreRows = useMemo<Row[]>(() => {
-    if (!initialTrendingGenreRecommendations) return []
-    const byId = new Map(initialTrendingGenreRecommendations.titles.map((title) => [title.id, title]))
+  const topRows = rows
 
-    return initialTrendingGenreRecommendations.genres
+  return (
+    <>
+      {topRows.length > 0 && (
+        <div className="space-y-2">
+          {topRows.map((row) => <ContentRow key={row.id} row={row} />)}
+        </div>
+      )}
+      {children}
+      <TrendingGenreRows data={initialTrendingGenreRecommendations} />
+    </>
+  )
+}
+
+export function TrendingGenreRows({ data }: { data: Personalization | null }) {
+  const { registerTitles } = useCatalog()
+  useEffect(() => { if (data) registerTitles(data.titles) }, [data, registerTitles])
+  const genreRows = useMemo<Row[]>(() => {
+    if (!data) return []
+    const byId = new Map(data.titles.map((title) => [title.id, title]))
+
+    return data.genres
       .map((genre) => ({
         id: `trending-genre-${genre.id}`,
         title: `Trending ${genre.name}`,
@@ -123,23 +146,7 @@ export function PersonalizedRows({
         },
       }))
       .filter((row) => row.titles.length > 0)
-  }, [initialTrendingGenreRecommendations])
+  }, [data])
 
-  const topRows = rows
-
-  return (
-    <>
-      {topRows.length > 0 && (
-        <div className="space-y-2">
-          {topRows.map((row) => <ContentRow key={row.id} row={row} />)}
-        </div>
-      )}
-      {children}
-      {genreRows.length > 0 && (
-        <div className="space-y-2">
-          {genreRows.map((row) => <ContentRow key={row.id} row={row} />)}
-        </div>
-      )}
-    </>
-  )
+  return <div className="space-y-2">{genreRows.map((row) => <ContentRow key={row.id} row={row} />)}</div>
 }

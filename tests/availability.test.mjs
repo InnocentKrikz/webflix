@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { releaseDay, isTitleReleased, isEpisodeReleased, resolvePlayback, nextPlaybackTarget } from '../lib/availability.ts'
+import { releaseDay, isTitleReleased, isEpisodeReleased, resolvePlayback, nextPlaybackTarget, pendingAdjacentSeason } from '../lib/availability.ts'
 
 const now = Date.parse('2026-09-07T12:00:00Z')
 const movie = { type: 'movie', status: 'Released', releaseDate: '2026-09-01' }
@@ -51,4 +51,20 @@ test('autoplay advances only to released episodes and stops before future conten
   assert.deepEqual(nextPlaybackTarget(show, { seasonIndex: 0, episodeIndex: 0 }, now), { seasonIndex: 0, episodeIndex: 1 })
   assert.equal(nextPlaybackTarget(show, { seasonIndex: 0, episodeIndex: 1 }, now), null)
   assert.deepEqual(nextPlaybackTarget(show, { seasonIndex: 0, episodeIndex: 2 }, Date.parse('2027-01-02')), { seasonIndex: 1, episodeIndex: 0 })
+})
+
+test('navigation cannot jump over a season whose release data has not loaded', () => {
+  const partiallyLoaded = {
+    ...show,
+    seasons: [
+      { number: 1, releaseDate: '2020-01-01', episodesLoaded: true, episodes: [episode(1, '2020-01-01')] },
+      { number: 2, releaseDate: '2020-01-01', episodesLoaded: false, episodes: [] },
+      { number: 3, releaseDate: '2020-01-01', episodesLoaded: true, episodes: [episode(1, '2020-01-01')] },
+    ],
+  }
+  assert.equal(nextPlaybackTarget(partiallyLoaded, { seasonIndex: 0, episodeIndex: 0 }, now), null)
+  assert.equal(pendingAdjacentSeason(partiallyLoaded, 0, 1, now), 2)
+  partiallyLoaded.seasons[1].episodesLoaded = true
+  assert.equal(pendingAdjacentSeason(partiallyLoaded, 0, 1, now), null)
+  assert.deepEqual(nextPlaybackTarget(partiallyLoaded, { seasonIndex: 0, episodeIndex: 0 }, now), { seasonIndex: 2, episodeIndex: 0 })
 })

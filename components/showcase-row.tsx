@@ -19,7 +19,24 @@ import {
 import { useModal } from "@/components/providers";
 import { TrailerAmbientGlow, useTrailerAmbient } from "@/components/trailer-ambient";
 import { YouTubeTrailer, type YouTubeTrailerHandle } from "@/components/youtube-trailer";
-import type { Row, Title } from "@/lib/types";
+import type { Row, Title, TrailerColorSample } from "@/lib/types";
+import { selectShowcaseTrailer } from "@/lib/title-trailers";
+
+function titleAmbientFallback(title: Title): TrailerColorSample {
+  const primary = title.dominantColor1 ?? title.dominantColor2 ?? title.dominantColor3 ?? "#2a1714";
+  const secondary = title.dominantColor2 ?? title.dominantColor3 ?? primary;
+  const tertiary = title.dominantColor3 ?? primary;
+
+  return {
+    timestamp: 0,
+    average: primary,
+    left: primary,
+    center: secondary,
+    right: tertiary,
+    top: primary,
+    bottom: secondary,
+  };
+}
 
 function ShowcaseTitle({
   title,
@@ -129,8 +146,7 @@ function CenterCard({
   addLogo: boolean;
   addText: boolean;
 }) {
-  const trailer =
-    title.trailers.find((item) => item.videoKey) ?? title.trailers[0];
+  const trailer = selectShowcaseTrailer(title.trailers);
   const playerRef = useRef<YouTubeTrailerHandle>(null);
   const [isPlaying, setIsPlaying] = useState(playing);
   const [isHovered, setIsHovered] = useState(false);
@@ -248,8 +264,9 @@ export function ShowcaseRow({ row }: { row: Row }) {
   const [loadedTrailerId, setLoadedTrailerId] = useState<Title["id"] | null>(null);
   const titles = row.titles;
   const active = titles.length > 0 ? titles[activeIndex % titles.length] : undefined;
-  const activeTrailer = active?.trailers.find((item) => item.videoKey) ?? active?.trailers[0];
+  const activeTrailer = active && selectShowcaseTrailer(active.trailers);
   const { sample: ambientSample, onTimeUpdate } = useTrailerAmbient(activeTrailer?.timeline);
+  const displayAmbientSample = ambientSample ?? (active ? titleAmbientFallback(active) : null);
   const trailerLoaded = active !== undefined && loadedTrailerId === active.id;
   const activeId = active?.id;
 
@@ -297,8 +314,12 @@ export function ShowcaseRow({ row }: { row: Row }) {
 
       <div className="no-scrollbar relative isolate mx-4 overflow-visible md:mx-12 md:max-2xl:mx-8">
         <TrailerAmbientGlow
-          sample={ambientSample}
-          visible={trailerLoaded}
+          sample={displayAmbientSample}
+          // The colour timeline is already available from our backend. Do not
+          // hide its initial glow while the third-party YouTube iframe loads.
+          // Playback time updates still drive the live colour changes once the
+          // player is ready.
+          visible={displayAmbientSample !== null}
           className="trailer-showcase-ambient z-0"
         />
         <div className="relative z-10 mx-auto grid h-[260px] max-w-[1800px] grid-cols-1 items-stretch gap-2 py-2 sm:h-[360px] sm:gap-3 md:grid-cols-[19fr_62fr_19fr] lg:h-[min(68vh,40vw)] lg:max-h-[640px] md:max-2xl:h-[min(58vh,36vw)] md:max-2xl:gap-2 md:max-2xl:py-1">

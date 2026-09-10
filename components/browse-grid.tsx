@@ -24,7 +24,7 @@ export function BrowseGrid({ titles, emptyLabel }: { titles: Title[]; emptyLabel
   return (
     <MediaGlowBoundary className="relative isolate overflow-visible">
       <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7">
-        <AnimatePresence mode="popLayout">
+        <AnimatePresence initial={false} mode="popLayout">
           {titles.map((t, i) => (
             <motion.div
               key={t.id}

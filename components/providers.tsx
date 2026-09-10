@@ -6,14 +6,15 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react'
 import { MotionConfig } from 'framer-motion'
-import { DetailModal } from '@/components/detail-modal'
 import { MatchProvider } from '@/components/match-provider'
 import { authClient } from '@/lib/auth-client'
 import { withFallbackDominantColors } from '@/lib/title-colors'
-import { syncViewerIdentity } from '@/lib/viewer-client'
+import { withFallbackTrailerTimelines } from '@/lib/title-trailers'
+import { ensureViewerIdentity, syncViewerIdentity } from '@/lib/viewer-client'
 import type { Title } from '@/lib/types'
 
 /* -------------------------- Effects preference -------------------------- */
@@ -52,19 +53,45 @@ const CatalogContext = createContext<CatalogContextValue | null>(null)
 /* ------------------------------ Modal store ------------------------------ */
 
 interface ModalContextValue {
-  openId: string | null
   open: (id: string) => void
   close: () => void
 }
 
 const ModalContext = createContext<ModalContextValue | null>(null)
+const ModalStateContext = createContext<string | null>(null)
+
+function ModalRenderer() {
+  const openId = useContext(ModalStateContext)
+  const [Modal, setModal] = useState<React.ComponentType | null>(null)
+  const [loadError, setLoadError] = useState<Error | null>(null)
+
+  useEffect(() => {
+    if (!openId || Modal) return
+    let active = true
+    // Mount the resolved component directly: a lazy Suspense boundary delayed
+    // first-click rendering even after its chunk had finished downloading.
+    void import('@/components/detail-modal').then(
+      ({ DetailModal }) => { if (active) setModal(() => DetailModal) },
+      (error: Error) => { if (active) setLoadError(error) },
+    )
+    return () => { active = false }
+  }, [openId, Modal])
+
+  if (loadError) throw loadError
+  return openId && Modal ? <Modal /> : null
+}
 
 function IdentityBootstrap() {
   const { data: session, isPending } = authClient.useSession()
+  const previousViewer = useRef<string | null>(null)
 
   useEffect(() => {
     if (isPending) return
-    void syncViewerIdentity()
+    const viewer = session?.user.id ?? 'guest'
+    const changed = previousViewer.current !== null && previousViewer.current !== viewer
+    previousViewer.current = viewer
+    const ready = changed || session?.user.id ? syncViewerIdentity() : ensureViewerIdentity()
+    void ready
       .then(() => {
         window.dispatchEvent(new Event('sceneflix:identity-merged'))
         window.dispatchEvent(new Event('sceneflix:activity'))
@@ -139,7 +166,13 @@ export function Providers({ children }: { children: React.ReactNode }) {
     setCatalog((current) => {
       const next = { ...current }
       for (const title of titles) {
-        next[title.id] = withFallbackDominantColors(title, current[title.id])
+        const existing = current[title.id]
+        if (existing?.detailsLoaded && !title.detailsLoaded) {
+          const merged = withFallbackTrailerTimelines(existing, title)
+          next[title.id] = title.watchProgress ? { ...merged, watchProgress: title.watchProgress } : merged
+          continue
+        }
+        next[title.id] = withFallbackTrailerTimelines(withFallbackDominantColors(title, existing), existing)
       }
       return next
     })
@@ -158,11 +191,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   const modal = useMemo<ModalContextValue>(
     () => ({
-      openId,
       open: (id: string) => setOpenId(id),
       close: () => setOpenId(null),
     }),
-    [openId],
+    [],
   )
 
   return (
@@ -175,10 +207,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
         <MyListContext.Provider value={myList}>
           <CatalogContext.Provider value={catalogValue}>
             <ModalContext.Provider value={modal}>
+            <ModalStateContext.Provider value={openId}>
               <MatchProvider>
                 {children}
-                <DetailModal />
+                <ModalRenderer />
               </MatchProvider>
+            </ModalStateContext.Provider>
             </ModalContext.Provider>
           </CatalogContext.Provider>
         </MyListContext.Provider>
@@ -210,3 +244,5 @@ export function useCatalog() {
   if (!ctx) throw new Error('useCatalog must be used within Providers')
   return ctx
 }
+
+export function useModalState() { return useContext(ModalStateContext) }

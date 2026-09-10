@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { ArrowLeft, Check, ListVideo, Server, SkipBack, SkipForward } from 'lucide-react'
-import { isEpisodeReleased, nextPlaybackTarget, previousPlaybackTarget, resolvePlayback, type PlaybackTarget } from '@/lib/availability'
+import { ArrowLeft, Check, ListVideo, Maximize, Minimize, Server, SkipBack, SkipForward } from 'lucide-react'
+import { pendingAdjacentSeason, isEpisodeReleased, nextPlaybackTarget, previousPlaybackTarget, resolvePlayback, type PlaybackTarget } from '@/lib/availability'
 import { cn, parseDurationToSeconds } from '@/lib/utils'
 import { ensureViewerIdentity, recordTitleView } from '@/lib/viewer-client'
 import {
@@ -14,7 +14,8 @@ import {
   VIDUKI_PROVIDERS,
   type PlayerProviderId,
 } from '@/lib/player-servers'
-import type { Title } from '@/lib/types'
+import type { Title, Season } from '@/lib/types'
+import { fetchCatalog } from '@/lib/catalog-client'
 
 const VIDUKI_PROGRESS_KEY = 'vidukinet-Progress'
 const BACKEND_URL = '/api/backend'
@@ -76,7 +77,7 @@ function episodeProgressFor(record: JsonRecord, seasonNumber: number | undefined
 }
 
 export function ProviderPlayer({
-  title,
+  title: initialTitle,
   initialSeason,
   initialEpisode,
   providerId = 'viduki-api-1',
@@ -88,7 +89,24 @@ export function ProviderPlayer({
   providerId?: PlayerProviderId
   onProviderChange?: (providerId: PlayerProviderId) => void
 }) {
+  const [loadedSeasons, setLoadedSeasons] = useState<Record<string, Season>>({})
+  const [loadingSeason, setLoadingSeason] = useState<number | null>(null)
+  const [seasonError, setSeasonError] = useState(false)
+  const title = useMemo(() => ({
+    ...initialTitle,
+    seasons: initialTitle.seasons?.map((season) => loadedSeasons[`${initialTitle.id}:${season.number}`] ?? season),
+  }), [initialTitle, loadedSeasons])
+  const loadSeason = useCallback(async (number: number) => {
+    setLoadingSeason(number)
+    setSeasonError(false)
+    try {
+      const loaded = await fetchCatalog<Season>(`/api/titles/${initialTitle.id}/seasons/${number}`)
+      setLoadedSeasons((current) => ({ ...current, [`${initialTitle.id}:${number}`]: { ...loaded, maturity: initialTitle.maturity } }))
+    } catch { setSeasonError(true) }
+    finally { setLoadingSeason((current) => current === number ? null : current) }
+  }, [initialTitle.id, initialTitle.maturity])
   const router = useRouter()
+  const playerRef = useRef<HTMLElement>(null)
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const latestProgress = useRef<SharedProgress | null>(null)
   const progressReadyKey = useRef<string | null>(null)
@@ -99,6 +117,7 @@ export function ProviderPlayer({
   const [controlsHovered, setControlsHovered] = useState(false)
   const [providerMenuOpen, setProviderMenuOpen] = useState(false)
   const [episodeMenuOpen, setEpisodeMenuOpen] = useState(false)
+  const [fullscreen, setFullscreen] = useState(false)
 
   const revealOverlayControls = useCallback(() => {
     setShowOverlayControls(true)
@@ -107,6 +126,20 @@ export function ProviderPlayer({
   }, [])
 
   const controlsVisible = showOverlayControls || controlsHovered || providerMenuOpen || episodeMenuOpen
+
+  const toggleFullscreen = useCallback(() => {
+    if (!document.fullscreenElement) {
+      playerRef.current?.requestFullscreen?.().catch(() => {})
+    } else {
+      document.exitFullscreen?.().catch(() => {})
+    }
+  }, [])
+
+  useEffect(() => {
+    const onFullscreenChange = () => setFullscreen(document.fullscreenElement === playerRef.current)
+    document.addEventListener('fullscreenchange', onFullscreenChange)
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange)
+  }, [])
 
   useEffect(() => {
     revealOverlayControls()
@@ -122,6 +155,7 @@ export function ProviderPlayer({
   const target = resolvePlayback(title, initialSeason, initialEpisode)
   const [seasonIndex, setSeasonIndex] = useState(target?.seasonIndex ?? 0)
   const [episodeIndex, setEpisodeIndex] = useState(target?.episodeIndex ?? 0)
+  const [menuSeasonIndex, setMenuSeasonIndex] = useState(target?.seasonIndex ?? 0)
 
   useEffect(() => {
     if (!target) return
@@ -213,16 +247,27 @@ export function ProviderPlayer({
     () => title.type === 'tv' ? nextPlaybackTarget(title, currentTarget) : null,
     [episodeIndex, seasonIndex, title],
   )
-  const episodeOptions = useMemo(
-    () => title.seasons?.flatMap((seasonOption, nextSeasonIndex) => seasonOption.episodes
-      .map((episodeOption, nextEpisodeIndex) => ({
-        season: seasonOption,
-        episode: episodeOption,
-        target: { seasonIndex: nextSeasonIndex, episodeIndex: nextEpisodeIndex },
-      }))
-      .filter(({ season: seasonOption, episode: episodeOption }) => isEpisodeReleased(title, seasonOption, episodeOption))) ?? [],
-    [title],
-  )
+  const episodeOptions = useMemo(() => {
+    const seasonOption = title.seasons?.[menuSeasonIndex]
+    return seasonOption?.episodes.map((episodeOption, nextEpisodeIndex) => ({
+      season: seasonOption, episode: episodeOption,
+      target: { seasonIndex: menuSeasonIndex, episodeIndex: nextEpisodeIndex },
+    })).filter(({ episode }) => isEpisodeReleased(title, seasonOption, episode)) ?? []
+  }, [title, menuSeasonIndex])
+
+  const menuSeason = title.seasons?.[menuSeasonIndex]
+  useEffect(() => {
+    if (episodeMenuOpen && menuSeason && !menuSeason.episodesLoaded) void loadSeason(menuSeason.number)
+  }, [episodeMenuOpen, menuSeason?.number, menuSeason?.episodesLoaded, loadSeason])
+
+  // Only the nearest usable season is prefetched at a boundary. Empty seasons
+  // can be crossed once their metadata confirms there are no playable episodes.
+  const nextPending = season && episodeIndex >= season.episodes.length - 2 ? pendingAdjacentSeason(title, seasonIndex, 1) : null
+  const previousPending = episodeIndex <= 1 ? pendingAdjacentSeason(title, seasonIndex, -1) : null
+  useEffect(() => {
+    if (nextPending !== null) void loadSeason(nextPending)
+    if (previousPending !== null) void loadSeason(previousPending)
+  }, [nextPending, previousPending, loadSeason])
 
   const saveProgress = useCallback((progress: SharedProgress) => {
     if (!Number.isInteger(tmdbId) || tmdbId <= 0 || progressReadyKey.current !== progressKey) return
@@ -369,52 +414,15 @@ export function ProviderPlayer({
 
   return (
     <main
-      className="relative h-screen w-screen overflow-hidden bg-black text-foreground"
+      ref={playerRef}
+      className="relative flex h-screen w-screen flex-col overflow-hidden bg-black text-foreground"
       onMouseMove={revealOverlayControls}
       onTouchStart={revealOverlayControls}
     >
-      <iframe
-        ref={iframeRef}
-        key={url}
-        src={url}
-        title={`${title.title} player`}
-        allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
-        allowFullScreen
-        className="absolute inset-0 size-full border-0"
-      />
-      <div
-        className="absolute left-0 top-0 z-10 h-24 w-16 cursor-pointer"
-        onMouseEnter={revealOverlayControls}
-        onTouchStart={revealOverlayControls}
-        onClick={() => setShowOverlayControls((visible) => !visible)}
-        aria-hidden="true"
-      />
-      <div
-        className="absolute right-0 top-0 z-10 h-24 w-16 cursor-pointer"
-        onMouseEnter={revealOverlayControls}
-        onTouchStart={revealOverlayControls}
-        onClick={() => setShowOverlayControls((visible) => !visible)}
-        aria-hidden="true"
-      />
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center gap-4 p-4 transition-opacity duration-300 sm:p-6">
-        <button
-          type="button"
-          onClick={() => router.back()}
-          aria-label="Back"
-          className={cn(
-            'grid size-10 shrink-0 place-items-center rounded-full border border-white/15 bg-black/25 backdrop-blur-md transition-colors hover:bg-white/10',
-            controlsVisible ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0',
-          )}
-        >
-          <ArrowLeft className="size-6" />
-        </button>
-       
-      </div>
-
       <div
         className={cn(
-          'absolute left-4 top-1/2 z-20 -translate-y-1/2 transition-all duration-300 sm:left-6',
-          controlsVisible ? 'pointer-events-auto translate-x-0 opacity-100' : 'pointer-events-none -translate-x-3 opacity-0',
+          'relative z-20 w-full flex-none border-b border-white/10 bg-black/95 p-3 transition-opacity duration-300 sm:p-5',
+          controlsVisible ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0',
         )}
         onMouseEnter={() => {
           setControlsHovered(true)
@@ -425,138 +433,167 @@ export function ProviderPlayer({
           revealOverlayControls()
         }}
       >
-        <DropdownMenu.Root open={providerMenuOpen} onOpenChange={(open) => {
-          setProviderMenuOpen(open)
-          if (open) revealOverlayControls()
-        }}>
-          <DropdownMenu.Trigger asChild>
-            <button
-              type="button"
-              aria-label={`Streaming provider: ${activeProvider.label}`}
-              title={activeProvider.label}
-              className="grid size-10 place-items-center rounded-full border border-white/20 bg-black/45 text-xs font-semibold shadow-lg shadow-black/20 backdrop-blur-xl transition-colors hover:border-white/35 hover:bg-black/65"
-            >
-              <Server className="size-4 text-foreground/80" />
-            </button>
-          </DropdownMenu.Trigger>
-          <DropdownMenu.Portal>
-            <DropdownMenu.Content
-              side="bottom"
-              align="start"
-              sideOffset={8}
-              className="z-[60] max-h-[min(60vh,28rem)] w-64 overflow-y-auto rounded-2xl border border-white/15 bg-black/85 p-1.5 text-foreground shadow-2xl shadow-black/40 backdrop-blur-2xl"
-            >
-              <p className="px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Sources</p>
-              {PLAYER_PROVIDERS.map((provider) => (
-                <DropdownMenu.Item
-                  key={provider.id}
-                  onSelect={() => {
-                    switchProvider(provider.id)
-                  }}
-                  className="flex cursor-pointer items-center justify-between gap-3 rounded-xl px-3 py-2.5 outline-none transition-colors data-[highlighted]:bg-white/10"
-                >
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm font-semibold">{provider.label}</span>
-                    <span className="block truncate text-[11px] text-muted-foreground">{provider.description}</span>
-                  </span>
-                  {activeProvider.id === provider.id && <Check className="size-4 shrink-0 text-primary" />}
-                </DropdownMenu.Item>
-              ))}
-            </DropdownMenu.Content>
-          </DropdownMenu.Portal>
-        </DropdownMenu.Root>
+        <div className="flex items-center gap-2 rounded-2xl border border-white/15 bg-black/45 p-2 shadow-2xl shadow-black/20 backdrop-blur-xl">
+          <button
+            type="button"
+            onClick={() => router.back()}
+            aria-label="Back"
+            title="Back"
+            className="grid size-10 shrink-0 place-items-center rounded-xl text-foreground transition-colors hover:bg-white/10"
+          >
+            <ArrowLeft className="size-5" />
+          </button>
+
+          <DropdownMenu.Root open={providerMenuOpen} onOpenChange={(open) => {
+            setProviderMenuOpen(open)
+            if (open) revealOverlayControls()
+          }}>
+            <DropdownMenu.Trigger asChild>
+              <button
+                type="button"
+                aria-label={`Streaming provider: ${activeProvider.label}`}
+                title={activeProvider.label}
+                className="flex h-10 items-center gap-2 rounded-xl border border-white/20 bg-white/5 px-3 text-xs font-semibold shadow-lg shadow-black/20 transition-colors hover:border-white/35 hover:bg-white/10"
+              >
+                <Server className="size-4 text-foreground/80" />
+                <span className="hidden sm:inline">Sources</span>
+              </button>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content
+                side="bottom"
+                align="start"
+                sideOffset={8}
+                className="z-[60] max-h-[min(60vh,28rem)] w-64 overflow-y-auto rounded-2xl border border-white/15 bg-black/85 p-1.5 text-foreground shadow-2xl shadow-black/40 backdrop-blur-2xl"
+              >
+                <p className="px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Sources</p>
+                {PLAYER_PROVIDERS.map((provider) => (
+                  <DropdownMenu.Item
+                    key={provider.id}
+                    onSelect={() => switchProvider(provider.id)}
+                    className="flex cursor-pointer items-center justify-between gap-3 rounded-xl px-3 py-2.5 outline-none transition-colors data-[highlighted]:bg-white/10"
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-semibold">{provider.label}</span>
+                      <span className="block truncate text-[11px] text-muted-foreground">{provider.description}</span>
+                    </span>
+                    {activeProvider.id === provider.id && <Check className="size-4 shrink-0 text-primary" />}
+                  </DropdownMenu.Item>
+                ))}
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Root>
+
+          {title.type === 'tv' && (
+            <div className="ml-1 flex items-center gap-1 border-l border-white/10 pl-2">
+              <button
+                type="button"
+                onClick={() => goToEpisode(previousTarget)}
+                disabled={!previousTarget}
+                aria-label="Previous episode"
+                title="Previous episode"
+                className="grid size-9 place-items-center rounded-xl text-foreground transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-35"
+              >
+                <SkipBack className="size-4" />
+              </button>
+              <DropdownMenu.Root open={episodeMenuOpen} onOpenChange={(open) => {
+                setEpisodeMenuOpen(open)
+                if (open) { setMenuSeasonIndex(seasonIndex); revealOverlayControls() }
+              }}>
+                <DropdownMenu.Trigger asChild>
+                  <button
+                    type="button"
+                    aria-label="Select episode"
+                    title={`S${season?.number}:E${episode?.number} · ${episode?.title ?? 'Episode'}`}
+                    className="grid size-9 place-items-center rounded-xl border border-white/15 bg-white/5 transition-colors hover:bg-white/15"
+                  >
+                    <ListVideo className="size-4" />
+                  </button>
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Portal>
+                  <DropdownMenu.Content
+                    side="bottom"
+                    align="start"
+                    sideOffset={8}
+                    className="z-[60] max-h-[min(70vh,32rem)] w-72 overflow-y-auto rounded-2xl border border-white/15 bg-black/85 p-1.5 text-foreground shadow-2xl shadow-black/40 backdrop-blur-2xl"
+                  >
+                    <p className="sticky top-0 z-10 bg-black/85 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground backdrop-blur-2xl">
+                      Episodes
+                    </p>
+                    <select
+                      aria-label="Season"
+                      value={menuSeasonIndex}
+                      onChange={(event) => setMenuSeasonIndex(Number(event.target.value))}
+                      className="mb-2 w-full rounded-lg border border-white/15 bg-black px-3 py-2 text-sm"
+                    >
+                      {title.seasons?.map((item, index) => <option key={item.number} value={index}>{item.name}</option>)}
+                    </select>
+                    {loadingSeason === menuSeason?.number && <p role="status" className="px-3 py-2 text-sm">Loading episodes…</p>}
+                    {seasonError && <button type="button" className="px-3 py-2 text-sm" onClick={() => menuSeason && void loadSeason(menuSeason.number)}>Retry loading episodes</button>}
+                    {episodeOptions.map(({ season: seasonOption, episode: episodeOption, target: optionTarget }) => {
+                      const selected = optionTarget.seasonIndex === seasonIndex && optionTarget.episodeIndex === episodeIndex
+                      return (
+                        <DropdownMenu.Item
+                          key={`${optionTarget.seasonIndex}:${optionTarget.episodeIndex}`}
+                          onSelect={() => {
+                            goToEpisode(optionTarget)
+                            revealOverlayControls()
+                          }}
+                          className={cn(
+                            'flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 outline-none transition-colors data-[highlighted]:bg-white/10',
+                            selected && 'bg-white/10',
+                          )}
+                        >
+                          <span className="w-12 shrink-0 text-xs font-semibold text-muted-foreground">
+                            S{seasonOption.number}:E{episodeOption.number}
+                          </span>
+                          <span className={cn('min-w-0 flex-1 truncate text-sm', selected ? 'font-semibold text-foreground' : 'text-foreground/80')}>
+                            {episodeOption.title}
+                          </span>
+                          {selected && <Check className="size-4 shrink-0 text-primary" />}
+                        </DropdownMenu.Item>
+                      )
+                    })}
+                  </DropdownMenu.Content>
+                </DropdownMenu.Portal>
+              </DropdownMenu.Root>
+              <button
+                type="button"
+                onClick={() => goToEpisode(nextTarget)}
+                disabled={!nextTarget}
+                aria-label="Next episode"
+                title="Next episode"
+                className="grid size-9 place-items-center rounded-xl text-foreground transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-35"
+              >
+                <SkipForward className="size-4" />
+              </button>
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={toggleFullscreen}
+            aria-label={fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+            title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            className="ml-auto grid size-10 place-items-center rounded-xl text-foreground transition-colors hover:bg-white/10"
+          >
+            {fullscreen ? <Minimize className="size-5" /> : <Maximize className="size-5" />}
+          </button>
+        </div>
       </div>
 
-      {title.type === 'tv' && (
-        <div
-          className={cn(
-            'absolute right-4 top-1/2 z-20 -translate-y-1/2 transition-all duration-300 sm:right-6',
-            controlsVisible ? 'pointer-events-auto translate-x-0 opacity-100' : 'pointer-events-none translate-x-3 opacity-0',
-          )}
-          onMouseEnter={() => {
-            setControlsHovered(true)
-            revealOverlayControls()
-          }}
-          onMouseLeave={() => {
-            setControlsHovered(false)
-            revealOverlayControls()
-          }}
-        >
-          <div className="pointer-events-auto flex flex-col items-center gap-2 rounded-full border border-white/20 bg-black/35 p-2 shadow-lg shadow-black/20 backdrop-blur-md">
-            <button
-              type="button"
-              onClick={() => goToEpisode(previousTarget)}
-              disabled={!previousTarget}
-              aria-label="Previous episode"
-              title="Previous episode"
-              className="grid size-9 place-items-center rounded-full text-foreground transition-colors hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-35"
-            >
-              <SkipBack className="size-4" />
-            </button>
-            <DropdownMenu.Root open={episodeMenuOpen} onOpenChange={(open) => {
-              setEpisodeMenuOpen(open)
-              if (open) revealOverlayControls()
-            }}>
-              <DropdownMenu.Trigger asChild>
-                <button
-                  type="button"
-                  aria-label="Select episode"
-                  title={`S${season?.number}:E${episode?.number} · ${episode?.title ?? 'Episode'}`}
-                  className="grid size-9 place-items-center rounded-full border border-white/15 bg-white/5 transition-colors hover:bg-white/15"
-                >
-                  <ListVideo className="size-4" />
-                </button>
-              </DropdownMenu.Trigger>
-              <DropdownMenu.Portal>
-                <DropdownMenu.Content
-                  side="left"
-                  align="center"
-                  sideOffset={10}
-                  className="z-[60] max-h-[min(70vh,32rem)] w-72 overflow-y-auto rounded-2xl border border-white/15 bg-black/85 p-1.5 text-foreground shadow-2xl shadow-black/40 backdrop-blur-2xl"
-                >
-                  <p className="sticky top-0 z-10 bg-black/85 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground backdrop-blur-2xl">
-                    Episodes
-                  </p>
-                  {episodeOptions.map(({ season: seasonOption, episode: episodeOption, target: optionTarget }) => {
-                    const selected = optionTarget.seasonIndex === seasonIndex && optionTarget.episodeIndex === episodeIndex
-                    return (
-                      <DropdownMenu.Item
-                        key={`${optionTarget.seasonIndex}:${optionTarget.episodeIndex}`}
-                        onSelect={() => {
-                          goToEpisode(optionTarget)
-                          revealOverlayControls()
-                        }}
-                        className={cn(
-                          'flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 outline-none transition-colors data-[highlighted]:bg-white/10',
-                          selected && 'bg-white/10',
-                        )}
-                      >
-                        <span className="w-12 shrink-0 text-xs font-semibold text-muted-foreground">
-                          S{seasonOption.number}:E{episodeOption.number}
-                        </span>
-                        <span className={cn('min-w-0 flex-1 truncate text-sm', selected ? 'font-semibold text-foreground' : 'text-foreground/80')}>
-                          {episodeOption.title}
-                        </span>
-                        {selected && <Check className="size-4 shrink-0 text-primary" />}
-                      </DropdownMenu.Item>
-                    )
-                  })}
-                </DropdownMenu.Content>
-              </DropdownMenu.Portal>
-            </DropdownMenu.Root>
-            <button
-              type="button"
-              onClick={() => goToEpisode(nextTarget)}
-              disabled={!nextTarget}
-              aria-label="Next episode"
-              title="Next episode"
-              className="grid size-9 place-items-center rounded-full text-foreground transition-colors hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-35"
-            >
-              <SkipForward className="size-4" />
-            </button>
-          </div>
-        </div>
-      )}
+      <div className="relative order-last min-h-0 flex-1 bg-black">
+        <iframe
+          ref={iframeRef}
+          key={url}
+          src={url}
+          title={`${title.title} player`}
+          allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
+          allowFullScreen
+          className="absolute inset-0 size-full border-0"
+           referrerPolicy="no-referrer"
+        />
+      </div>
     </main>
   )
 }

@@ -1,6 +1,7 @@
 'use client'
 
 import { createContext, useContext, useEffect, useMemo, useSyncExternalStore } from 'react'
+import { ensureViewerIdentity } from '@/lib/viewer-client'
 import { authClient } from '@/lib/auth-client'
 import { EMPTY_MATCH, MatchStore } from '@/lib/match-client'
 
@@ -9,7 +10,7 @@ const MatchContext = createContext<MatchStore | null>(null)
 export function MatchProvider({ children }: { children: React.ReactNode }) {
   const { data: session } = authClient.useSession()
   const userId = session?.user.id ?? null
-  const store = useMemo(() => new MatchStore(userId), [userId])
+  const store = useMemo(() => new MatchStore(userId, ensureViewerIdentity), [userId])
 
   useEffect(() => {
     store.activate()

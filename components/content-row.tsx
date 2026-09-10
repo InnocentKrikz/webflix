@@ -115,7 +115,7 @@ function StandardContentRow({ row }: { row: Row }) {
           onScroll={updateScrollState}
           className={cn('no-scrollbar relative flex gap-2.5 overflow-x-auto overscroll-x-contain scroll-smooth px-3 pb-8 pt-2 md:gap-3 md:max-2xl:gap-2.5 md:max-2xl:pb-6 md:max-2xl:pt-1', kind === 'ranked' && 'items-end')}
         >
-          <AnimatePresence mode="popLayout">
+          <AnimatePresence initial={false} mode="popLayout">
             {titles.map((t, i) => (
               <motion.div
                 key={t.id}

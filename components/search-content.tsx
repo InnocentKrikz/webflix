@@ -7,13 +7,14 @@ import { Search as SearchIcon } from 'lucide-react'
 import { CatalogHydrator } from '@/components/catalog-hydrator'
 import { BrowseGrid } from '@/components/browse-grid'
 import { BrowseGridSkeleton } from '@/components/media-skeletons'
+import { fetchCatalog } from '@/lib/catalog-client'
 import type { Title } from '@/lib/types'
 
-export function SearchContent() {
+export function SearchContent({ initialServerQuery, initialTitles }: { initialServerQuery: string; initialTitles: Title[] }) {
   const params = useSearchParams()
   const initialQuery = params.get('q') ?? ''
   const [query, setQuery] = useState(initialQuery)
-  const [titles, setTitles] = useState<Title[]>([])
+  const [titles, setTitles] = useState<Title[]>(initialTitles)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -22,18 +23,22 @@ export function SearchContent() {
 
   useEffect(() => {
     const trimmed = query.trim()
-    if (!trimmed) {
+    if (trimmed.length < 2) {
       setTitles([])
       setLoading(false)
       return
     }
 
+    if (query === initialServerQuery) {
+      setTitles(initialTitles)
+      setLoading(false)
+      return
+    }
     const controller = new AbortController()
     setLoading(true)
     const timeout = setTimeout(() => {
       const searchParams = new URLSearchParams({ query: trimmed })
-      fetch(`/api/titles?${searchParams.toString()}`, { signal: controller.signal })
-        .then((response) => (response.ok ? response.json() : []))
+      fetchCatalog<Title[]>(`/api/titles?${searchParams.toString()}`, controller.signal)
         .then((nextTitles: Title[]) => {
           if (!controller.signal.aborted) setTitles(nextTitles)
         })
@@ -49,13 +54,13 @@ export function SearchContent() {
       clearTimeout(timeout)
       controller.abort()
     }
-  }, [query])
+  }, [query, initialServerQuery, initialTitles])
 
   return (
     <div className="mx-auto max-w-[1600px] px-4 pb-20 pt-28 md:px-12 md:pt-32">
       <CatalogHydrator titles={titles} />
       <motion.div
-        initial={{ opacity: 0, y: 12 }}
+        initial={false}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4 }}
         className="mb-8"
@@ -80,7 +85,7 @@ export function SearchContent() {
               ? `Searching for "${query}"`
               : `${titles.length} result${titles.length === 1 ? '' : 's'} for "${query}"`}
           </p>
-          {loading ? (
+          {loading && titles.length === 0 ? (
             <BrowseGridSkeleton />
           ) : (
             <BrowseGrid titles={titles} emptyLabel="Try searching a different title, genre, or cast member." />

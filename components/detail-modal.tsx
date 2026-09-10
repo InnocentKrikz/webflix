@@ -23,7 +23,7 @@ import {
   VolumeX,
   X,
 } from 'lucide-react'
-import { useCatalog, useEffects, useModal, useMyList } from '@/components/providers'
+import { useCatalog, useEffects, useModal, useModalState, useMyList } from '@/components/providers'
 import { LandscapeCard } from '@/components/media-card'
 import { MediaGlowBoundary } from '@/components/media-card-glow'
 import { MatchScore } from '@/components/match-score'
@@ -33,7 +33,8 @@ import { YouTubeTrailer, type YouTubeTrailerHandle } from '@/components/youtube-
 import { cn } from '@/lib/utils'
 import { isEpisodeReleased, isSeasonReleased, isTitleReleased } from '@/lib/availability'
 import { getTitleViewStats } from '@/lib/viewer-client'
-import type { Title } from '@/lib/types'
+import type { Title, Season } from '@/lib/types'
+import { fetchCatalog } from '@/lib/catalog-client'
 
 function watchHref(title: Title) {
   const progress = title.watchProgress
@@ -114,7 +115,8 @@ function EpisodeRow({
 }
 
 export function DetailModal() {
-  const { openId, close, open } = useModal()
+  const { close, open } = useModal()
+  const openId = useModalState()
   const { getTitle, registerTitles } = useCatalog()
   const { reducedEffects } = useEffects()
   const router = useRouter()
@@ -130,6 +132,8 @@ export function DetailModal() {
   const [trailerControlsVisible, setTrailerControlsVisible] = useState(false)
   const [failedTrailer, setFailedTrailer] = useState<string | null>(null)
   const [expanded, setExpanded] = useState(false)
+  const [relatedTitles, setRelatedTitles] = useState<Title[]>([])
+  const [seasonLoading, setSeasonLoading] = useState(false)
   const [viewCount, setViewCount] = useState<number | null>(null)
   const trailerPlayerRef = useRef<YouTubeTrailerHandle>(null)
   const trailerIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -154,9 +158,9 @@ export function DetailModal() {
     const controller = new AbortController()
     setLoadingId(detailId)
 
-    fetch(`/api/titles/${detailId}`, { signal: controller.signal })
-      .then((response) => (response.ok ? response.json() : undefined))
+    fetchCatalog<Title>(`/api/titles/${detailId}`, controller.signal)
       .then((detail: Title | undefined) => {
+        if (controller.signal.aborted) return
         if (detail) {
           const detailWithProgress = catalogTitle?.watchProgress
             ? { ...detail, watchProgress: catalogTitle.watchProgress }
@@ -178,9 +182,32 @@ export function DetailModal() {
   }, [catalogTitle?.detailsLoaded, openId, registerTitles])
 
   const similar = useMemo(() => {
+    if (relatedTitles.length) return relatedTitles.slice(0, 6)
     if (!title) return []
     return title.similar.map(getTitle).filter((t): t is Title => Boolean(t)).slice(0, 6)
-  }, [title])
+  }, [title, relatedTitles, getTitle])
+
+  useEffect(() => {
+    if (!openId) return
+    const controller = new AbortController()
+    setRelatedTitles([])
+    void fetchCatalog<Title[]>(`/api/titles/${openId}/related`, controller.signal)
+      .then((items) => { if (!controller.signal.aborted) { setRelatedTitles(items); registerTitles(items) } })
+      .catch(() => {})
+    return () => controller.abort()
+  }, [openId, registerTitles])
+
+  useEffect(() => {
+    if (!openId) return
+    const [type, id] = openId.split('-')
+    const timer = setTimeout(() => {
+      void fetch('/api/backend/sync/item', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mediaType: type === 'tv' ? 'TV' : 'MOVIE', tmdbId: Number(id), background: true }),
+      }).catch(() => {})
+    }, 1500)
+    return () => clearTimeout(timer)
+  }, [openId])
 
   const trailers = useMemo(
     () => [...(title?.trailers ?? [])].sort((a, b) => Number(b.kind === 'Trailer') - Number(a.kind === 'Trailer')),
@@ -230,6 +257,21 @@ export function DetailModal() {
   }, [openId])
 
   const season = title?.seasons?.[seasonIdx] ?? title?.seasons?.[0]
+
+  useEffect(() => {
+    if (!title || !title.detailsLoaded || title.type !== 'tv' || !season || season.episodesLoaded) { setSeasonLoading(false); return }
+    const controller = new AbortController()
+    setSeasonLoading(true)
+    void fetchCatalog<Season>(`/api/titles/${title.id}/seasons/${season.number}`, controller.signal)
+      .then((loaded) => {
+        if (controller.signal.aborted) return
+        setDetailTitle((current) => {
+          const source = current?.id === title.id ? current : title
+          return { ...source, seasons: source.seasons?.map((item) => item.number === loaded.number ? loaded : item) }
+        })
+      }).catch(() => {}).finally(() => { if (!controller.signal.aborted) setSeasonLoading(false) })
+    return () => controller.abort()
+  }, [title?.id, title?.detailsLoaded, season?.number, season?.episodesLoaded])
 
   function onOpenChange(open: boolean) {
     if (!open) {
@@ -562,6 +604,9 @@ export function DetailModal() {
                           <Link
                             key={`${member.name}-${member.character}-${index}`}
                             href={member.id ? `/people/${member.id}` : '#'}
+                            prefetch={false}
+                            onMouseEnter={() => { if (member.id) router.prefetch(`/people/${member.id}`) }}
+                            onFocus={() => { if (member.id) router.prefetch(`/people/${member.id}`) }}
                             onClick={(event) => {
                               if (!member.id) event.preventDefault()
                               else close()
@@ -595,6 +640,9 @@ export function DetailModal() {
                           <Link
                             key={company.id}
                             href={`/production-company/${company.id}`}
+                            prefetch={false}
+                            onMouseEnter={() => router.prefetch(`/production-company/${company.id}`)}
+                            onFocus={() => router.prefetch(`/production-company/${company.id}`)}
                             onClick={() => close()}
                             className="flex min-h-20 items-center gap-4 rounded-lg border border-white/10 bg-white/[0.03] p-3 transition-colors hover:border-primary/50 hover:bg-white/[0.06]"
                           >
@@ -642,7 +690,7 @@ export function DetailModal() {
                                     className="cursor-pointer rounded px-3 py-2 text-sm outline-none data-[highlighted]:bg-white/10 data-[state=checked]:text-primary"
                                   >
                                     <Select.ItemText>
-                                      {s.name}{isSeasonReleased(s) ? ` (${s.episodes.length} Episodes)` : ' · Coming Soon'}
+                                      {s.name}{isSeasonReleased(s) ? ` (${s.episodeCount ?? s.episodes.length} Episodes)` : ' · Coming Soon'}
                                     </Select.ItemText>
                                   </Select.Item>
                                 ))}
@@ -674,7 +722,8 @@ export function DetailModal() {
 
                       <ul>
                         <AnimatePresence mode="wait">
-                          {season.episodes.map((ep) => (
+                          {seasonLoading && <li className="py-6 text-sm text-muted-foreground">Loading episodes…</li>}
+                        {season.episodes.map((ep) => (
                             <EpisodeRow
                               key={ep.id}
                               episode={ep}
@@ -689,7 +738,7 @@ export function DetailModal() {
                           ))}
                         </AnimatePresence>
                       </ul>
-                      {season.episodes.length === 0 && (
+                      {!seasonLoading && season.episodes.length === 0 && (
                         <p className="py-4 text-sm text-muted-foreground">Episodes are coming soon.</p>
                       )}
                     </div>

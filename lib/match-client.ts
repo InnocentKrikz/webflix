@@ -36,7 +36,8 @@ export class MatchStore {
   private disposed = false
 
   readonly userId: string | null
-  constructor(userId: string | null) { this.userId = userId }
+  private prepareViewer: () => Promise<void>
+  constructor(userId: string | null, prepareViewer = () => Promise.resolve()) { this.userId = userId; this.prepareViewer = prepareViewer }
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener)
@@ -89,6 +90,7 @@ export class MatchStore {
     this.running++
     this.schedule()
     try {
+      await this.prepareViewer()
       const response = await fetch(`${BACKEND_URL}/matches`, {
         method: 'POST', credentials: 'include', cache: 'no-store', signal: controller.signal,
         headers: { 'Content-Type': 'application/json' },
@@ -129,6 +131,7 @@ export class MatchStore {
     const controller = new AbortController()
     this.ratingControllers.add(controller)
     try {
+      await this.prepareViewer()
       const response = await fetch(`${BACKEND_URL}/feedback`, {
         method: 'PUT', credentials: 'include', signal: controller.signal,
         headers: { 'Content-Type': 'application/json' },
