@@ -102,7 +102,7 @@ export function Navbar() {
   return (
     <header
       className={cn(
-        'mobile-navbar-surface fixed inset-x-0 top-0 z-50 transition-colors duration-500',
+        'mobile-navbar-surface fixed inset-x-0 z-50 transition-colors duration-500',
         scrolled
           ? 'bg-background/85 backdrop-blur-xl border-b border-white/5'
           : 'bg-gradient-to-b from-black/80 via-black/40 to-transparent',

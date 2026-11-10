@@ -2,6 +2,7 @@ import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
 import { Inter, Sora } from 'next/font/google'
 import { Providers } from '@/components/providers'
+import { AdguardBanner } from '@/components/adguard-banner'
 import { SITE_DESCRIPTION, SITE_NAME, SITE_SOCIAL_IMAGE } from '@/lib/site-metadata'
 import './globals.css'
 
@@ -85,10 +86,12 @@ export default function RootLayout({
   return (
     <html lang="en" className={`dark ${inter.variable} ${sora.variable}`} suppressHydrationWarning>
       <head>
+        <meta name="clickaine-site-verification" content="88d5e600bf60872482872a014f12a9bbd2e8f7225da0866c34a58d4a0a0f04a4085eb6d4d7b450d077ee876a52203365b6e213028c7bf165f0e199bddd67249f" />
         <link rel="preconnect" href="https://image.tmdb.org" />
         <script dangerouslySetInnerHTML={{ __html: effectsPreferenceScript }} />
       </head>
       <body className="bg-background text-foreground antialiased">
+        <AdguardBanner />
         <Providers>{children}</Providers>
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>

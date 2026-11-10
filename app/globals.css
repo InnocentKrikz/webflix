@@ -112,6 +112,12 @@
   }
 }
 
+/* The site-wide notice occupies the top of the page, so the fixed navbar
+   moves below it while the notice is visible instead of overlapping it. */
+.mobile-navbar-surface {
+  top: var(--adguard-banner-height, 0px);
+}
+
 @layer utilities {
   .auth-phone-input .PhoneInputCountry {
     width: 3.5rem;

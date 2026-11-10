@@ -1,7 +1,7 @@
 import "server-only";
 import { cache } from "react";
 
-const TMDB_BASE_URL = (process.env.BACKEND_URL ?? process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://127.0.0.1:3005").replace(/\/$/, "");
+const TMDB_BASE_URL = (process.env.BACKEND_URL ?? process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://127.0.0.1:4000").replace(/\/$/, "");
 
 // Every call here is public catalog data. Authenticated requests use backend-proxy.
 const tmdbFetch = cache(async <T>(endpoint: string, signal?: AbortSignal): Promise<T> => {

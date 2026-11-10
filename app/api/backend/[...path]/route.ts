@@ -6,7 +6,7 @@ export const runtime = 'nodejs'
 async function proxy(request: Request) {
   const requestUrl = new URL(request.url)
   const backendPath = requestUrl.pathname.replace(/^\/api\/backend/, '') || '/'
-  return proxyToBackend(request, backendPath)
+  return proxyToBackend(request, backendPath, '/api/backend')
 }
 
 export const GET = proxy

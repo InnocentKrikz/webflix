@@ -4,7 +4,7 @@ import { splitSetCookieHeader } from 'better-auth/cookies/utils'
 const BACKEND_URL = (
   process.env.BACKEND_URL ??
   process.env.NEXT_PUBLIC_BACKEND_URL ??
-  'http://localhost:3005'
+  'http://localhost:4000'
 ).replace(/\/$/, '')
 
 const HOP_BY_HOP_HEADERS = [
@@ -48,13 +48,15 @@ function responseHeaders(response: Response) {
   return headers
 }
 
-export async function proxyToBackend(request: Request, backendPath: string) {
+export async function proxyToBackend(request: Request, backendPath: string, pathPrefix = '') {
   const requestUrl = new URL(request.url)
   const method = request.method.toUpperCase()
   const body = method === 'GET' || method === 'HEAD' ? undefined : await request.arrayBuffer()
+  const headers = forwardedHeaders(request)
+  if (pathPrefix) headers.set('x-forwarded-path-prefix', pathPrefix)
   const response = await fetch(`${BACKEND_URL}${backendPath}${requestUrl.search}`, {
     method,
-    headers: forwardedHeaders(request),
+    headers,
     ...(body && body.byteLength ? { body } : {}),
     cache: 'no-store',
     redirect: 'manual',
